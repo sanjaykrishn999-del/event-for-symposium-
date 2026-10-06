@@ -12,7 +12,9 @@ messages, login pages and QR scenarios and decide whether each one is
 
 ## Running it
 
-The quiz and monitoring API run on Node.js 20 or newer. Install dependencies
+The quiz and monitoring API run on Node.js 22 LTS. This runtime is pinned
+because the native `better-sqlite3` addon does not build against Node.js 26.
+Install dependencies
 once with `npm install`, then configure the server-only admin ID, salted
 scrypt password hash, and session signing secret in a local, Git-ignored `.env`
 file before starting the application.
