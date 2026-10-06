@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: phishguard-symposium
+    runtime: node
+    buildCommand: npm ci
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PHISHGUARD_ADMIN_ID
+        sync: false
+      - key: PHISHGUARD_ADMIN_PASSWORD_HASH
+        sync: false
+      - key: PHISHGUARD_SESSION_SECRET
+        sync: false

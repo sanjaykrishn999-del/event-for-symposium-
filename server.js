@@ -572,7 +572,7 @@ if (require.main === module) {
   try {
     const { app } = createApp();
     const port = Number(process.env.PORT || 8000);
-    const host = process.env.HOST || "127.0.0.1";
+    const host = process.env.HOST || (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
     app.listen(port, host, () => console.log(`PhishGuard listening on http://${host}:${port}`));
   } catch (error) {
     console.error(error.message);
