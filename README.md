@@ -82,6 +82,9 @@ event publisher. The disk requires a Render plan that supports persistent
 disks. Use the exact **Web Service** HTTPS URL on every PC, laptop, and mobile
 device; `localhost` always refers to the device itself. Do not use the old
 Static Site URL or a separately hosted copy of the frontend.
+After deployment, verify `<web-service-url>/api/health` returns JSON with
+`"status":"ok"`. The admin and participant pages must share the same HTTPS
+origin; a 404 from `/api/health` means the URL is not serving this backend.
 
 The opening screen plays an original, lightweight canvas web-swing sequence
 behind a rotating cybersecurity calibration HUD. Its responsive city framing,
