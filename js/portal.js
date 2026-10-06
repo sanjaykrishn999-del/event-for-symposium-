@@ -5,6 +5,7 @@
   const ACTIVE_KEY = "phishguard.active.attempt.v1";
   let attempt = null;
   let answerLocked = false;
+  let stopMonitoringStream = null;
 
   function esc(value) {
     return String(value == null ? "" : value).replace(/[&<>"]/g, char =>
@@ -41,12 +42,14 @@
     $("#contestNext").innerHTML = "";
     $("#contestLegit").disabled = false;
     $("#contestPhish").disabled = false;
+    PGMonitoringService.updateProgress(attempt);
     go("contest-quiz");
   }
 
   function startAttempt(saved) {
     attempt = saved;
     sessionStorage.setItem(ACTIVE_KEY, attempt.id);
+    PGMonitoringService.start(attempt);
     showCurrentQuestion();
   }
 
@@ -90,6 +93,7 @@
     } else {
       const result = PGQuizService.score(attempt);
       PGParticipantService.finish(attempt, result.total, result.roundScores);
+      PGMonitoringService.finish(attempt);
       setText("#completedAttemptId", attempt.id);
       sessionStorage.removeItem(ACTIVE_KEY);
       attempt = null;
@@ -166,20 +170,23 @@
     }
   });
 
-  $("#adminLoginForm").addEventListener("submit", event => {
+  $("#adminLoginForm").addEventListener("submit", async event => {
     event.preventDefault();
-    const fields = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const fields = new FormData(form);
     try {
-      if (!PGAuthService.login(String(fields.get("adminId") || "").trim(), String(fields.get("password") || ""))) {
+      if (!await PGAuthService.login(String(fields.get("adminId") || "").trim(), String(fields.get("password") || ""))) {
         report("#adminLoginError", "Admin ID or password is incorrect.");
         return;
       }
-      event.currentTarget.reset();
+      if (form && typeof form.reset === "function") form.reset();
       report("#adminLoginError", "");
       renderDashboard();
       go("admin");
+      startLiveMonitoring();
     } catch (error) {
-      report("#adminLoginError", "Admin login is unavailable: " + error.message);
+      report("#adminLoginError", error.message === "Admin ID or password is incorrect."
+        ? error.message : "Admin login is unavailable: " + error.message);
     }
   });
 
@@ -257,6 +264,87 @@
       $("#participantRows").innerHTML = `<tr><td colspan="10" class="empty">Could not load participant data: ${esc(error.message)}</td></tr>`;
       report("#adminCount", "Storage error");
     }
+  }
+
+  function activityLabel(event) {
+      if (event.event_type === "TAB_HIDDEN") return "LEFT QUIZ TAB";
+      if (event.event_type === "WINDOW_BLUR") return "QUIZ WINDOW LOST FOCUS";
+      if (event.event_type === "RETURNED") {
+        return `RETURNED${event.duration_seconds == null ? "" : ` · INACTIVE ${event.duration_seconds}s`}`;
+      }
+      if (event.event_type === "FULLSCREEN_EXIT") return "EXITED FULLSCREEN";
+      if (event.event_type === "SESSION_STARTED") return "QUIZ STARTED";
+      if (event.event_type === "QUIZ_COMPLETED") return "QUIZ COMPLETED";
+      if (event.event_type === "PAGE_RESUMED") return "QUIZ RESUMED";
+      if (event.event_type === "PAGE_HIDDEN") return "QUIZ PAGE HIDDEN";
+      return "QUESTION PROGRESS";
+  }
+
+  function renderLiveMonitor(data) {
+      const participants = $("#liveParticipants");
+      const feed = $("#monitorFeed");
+      participants.innerHTML = data.participants.length ? data.participants.map(person => {
+        const status = person.currentStatus;
+        const attention = ["ATTENTION", "AWAY", "STALE"].includes(status);
+        const statusText = status === "AWAY" ? "AWAY" : status === "STALE" ? "NO RECENT SIGNAL" :
+          attention ? "ATTENTION" : "ACTIVE";
+        const roundName = person.round === 3 ? "Final Round" : `Round ${person.round}`;
+        const total = PGQuizService.roundSize(person.round);
+        const lastEvent = person.lastEvent ? activityLabel({ event_type: person.lastEvent }) : "—";
+        return `<article class="monitor-participant ${attention ? "needs-attention" : ""}">
+          <div class="monitor-card-heading">
+            <span class="monitor-status ${attention ? "attention" : "active"}">${attention ? "🟠" : "🟢"} ${statusText}</span>
+            <span class="qmeta">${esc(person.participantId)}</span>
+          </div>
+          <h4>${esc(person.participantName)}</h4>
+          <p class="monitor-identity">${esc(person.college)} · ${esc(person.department)} · ${esc(person.year)}</p>
+          <p class="monitor-identity"><a href="mailto:${encodeURIComponent(person.email)}">${esc(person.email)}</a></p>
+          <p class="monitor-position">${esc(roundName)} — Question ${person.questionNumber}/${total}</p>
+          <p class="monitor-last">Quiz status: ${esc(person.quizStatus)}</p>
+          <div class="monitor-counts">
+            <span>Tab switches <b>${person.tabSwitches}</b></span>
+            <span>Focus losses <b>${person.focusLosses}</b></span>
+            <span>Fullscreen exits <b>${person.fullscreenExits}</b></span>
+            <span>Returns <b>${person.returns}</b></span>
+          </div>
+          <p class="monitor-last">Last activity: ${esc(new Date(person.lastActivity).toLocaleTimeString())}</p>
+          <p class="monitor-last">Last event: ${esc(lastEvent)}</p>
+        </article>`;
+      }).join("") : `<p class="empty">No active participants.</p>`;
+      feed.innerHTML = data.events.length ? data.events.slice(0, 30).map(event => {
+        const warning = ["TAB_HIDDEN", "WINDOW_BLUR", "FULLSCREEN_EXIT", "PAGE_HIDDEN"].includes(event.event_type);
+        return `<li class="${warning ? "monitor-warning" : ""}">
+          <span class="monitor-event-type">${warning ? "⚠" : "✓"} ${esc(activityLabel(event))}</span>
+          <span>${esc(event.participant_name)} · Round ${event.round}, Question ${event.question_number}</span>
+          <time datetime="${esc(event.timestamp)}">${esc(new Date(event.timestamp).toLocaleTimeString())}</time>
+        </li>`;
+      }).join("") : `<li class="empty">No activity recorded yet.</li>`;
+  }
+
+  function stopLiveMonitoring() {
+      if (stopMonitoringStream) stopMonitoringStream();
+      stopMonitoringStream = null;
+      $("#monitorConnection").textContent = "DISCONNECTED";
+      $("#monitorConnection").classList.remove("connected");
+  }
+
+  function startLiveMonitoring() {
+      if (!PGAuthService.isAuthenticated()) return;
+      if (stopMonitoringStream) stopMonitoringStream();
+      $("#monitorConnection").textContent = "CONNECTING";
+      PGMonitoringService.adminSnapshot().then(renderLiveMonitor).catch(error => {
+        $("#monitorConnection").textContent = "UNAVAILABLE";
+        $("#liveParticipants").innerHTML = `<p class="form-error">Could not load monitoring data: ${esc(error.message)}</p>`;
+      });
+      stopMonitoringStream = PGMonitoringService.subscribeAdmin(data => {
+        $("#monitorConnection").textContent = "LIVE";
+        $("#monitorConnection").classList.add("connected");
+        renderLiveMonitor(data);
+      }, error => {
+        $("#monitorConnection").textContent = "RECONNECTING";
+        $("#monitorConnection").classList.remove("connected");
+        console.error("Admin monitoring stream:", error);
+      });
   }
 
   function renderParticipantDetail(id) {
@@ -379,17 +467,37 @@
   });
   $("#exportResults").addEventListener("click", exportResults);
   $("#exportAnswers").addEventListener("click", exportAnswers);
-  $("#adminLogout").addEventListener("click", () => {
-    PGAuthService.logout();
+  $("#adminLogout").addEventListener("click", async () => {
+    stopLiveMonitoring();
     $("#participantDetail").hidden = true;
     history.replaceState(null, "", location.pathname + location.search);
-    go("admin-login");
+    try {
+      await PGAuthService.logout();
+      $("#liveParticipants").innerHTML = `<p class="empty">Admin access required to view monitoring.</p>`;
+      $("#monitorFeed").innerHTML = `<li class="empty">Admin access required to view monitoring.</li>`;
+      go("admin-login");
+    } catch (error) {
+      report("#adminError", "Could not end the admin session: " + error.message);
+    }
   });
 
-  window.addEventListener("pageshow", () => {
-    if (!PGAuthService.isAuthenticated() && $("#view-admin").classList.contains("active")) go("admin-login");
+  window.addEventListener("pageshow", async () => {
+    try {
+      await PGAuthService.restore();
+      if (!PGAuthService.isAuthenticated() && $("#view-admin").classList.contains("active")) go("admin-login");
+      else if (PGAuthService.isAuthenticated() && $("#view-admin").classList.contains("active")) startLiveMonitoring();
+    } catch (error) {
+      if ($("#view-admin").classList.contains("active")) go("admin-login");
+      console.error("Admin session restore:", error);
+    }
   });
 
-  if (PGAuthService.isAuthenticated()) renderDashboard();
+  PGAuthService.restore().then(authenticated => {
+    if (authenticated) {
+      renderDashboard();
+      go("admin");
+      startLiveMonitoring();
+    }
+  }).catch(error => console.error("Admin session restore:", error));
   if (activeAttemptId()) resumeActiveAttempt();
 })();

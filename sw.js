@@ -1,11 +1,12 @@
 /* PhishGuard offline cache. Only active when the site is served over http(s);
    opening index.html directly from the file system already works offline. */
-const CACHE = 'phishguard-v12';
+const CACHE = 'phishguard-v16';
 const ASSETS = [
   './', './index.html', './css/styles.css',
-  './js/data.js', './js/admin-config.js', './js/data-service.js',
+  './js/data.js', './js/data-service.js',
   './js/auth-service.js', './js/participant-service.js',
-  './js/quiz-service.js', './js/cinematic-intro.js', './js/app.js', './js/portal.js',
+  './js/quiz-service.js', './js/monitoring-service.js',
+  './js/cinematic-intro.js', './js/app.js', './js/portal.js',
   './manifest.webmanifest', './assets/icon.svg'
 ];
 self.addEventListener('install', e => {
@@ -18,6 +19,10 @@ self.addEventListener('activate', e => {
 });
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  if (new URL(e.request.url).pathname.includes('/api/')) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
   e.respondWith(
     caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
       const copy = res.clone();

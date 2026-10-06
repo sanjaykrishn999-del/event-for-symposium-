@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>SYMPOSIUM — Department of Cyber Security</title>
+<title>PHISHGUARD — Department of Cyber Security Symposium</title>
 <meta name="description" content="The Department of Cyber Security symposium: an original cinematic cyber experience and educational PHISHGUARD phishing-awareness quiz.">
 <link rel="stylesheet" href="css/styles.css">
 <link rel="manifest" href="manifest.webmanifest">
@@ -16,6 +16,28 @@
   <canvas id="cinematicCanvas" aria-hidden="true"></canvas>
   <div class="cinema-vignette" aria-hidden="true"></div>
   <div class="cinema-scanline" aria-hidden="true"></div>
+  <div class="cinema-hud" id="cinemaHud" aria-hidden="false">
+    <div class="hud-ring hud-ring-outer" aria-hidden="true"></div>
+    <div class="hud-ring hud-ring-middle" aria-hidden="true"></div>
+    <div class="hud-ring hud-ring-inner" aria-hidden="true"></div>
+    <div class="hud-crosshair" aria-hidden="true"></div>
+    <div class="hud-readout hud-readout-left" aria-hidden="true">THREAT SCAN <span>ACTIVE</span><br>NETWORK <span>ENCRYPTED</span></div>
+    <div class="hud-readout hud-readout-right" aria-hidden="true">NODE 07 <span>SECURE</span><br>UPLINK <span>ESTABLISHED</span></div>
+    <div class="hud-center">
+      <p class="hud-eyebrow">PHISHGUARD <span>///</span> CYBER DEFENSE</p>
+      <p class="hud-status" id="hudStatus">INITIALIZING PHISHGUARD_</p>
+      <p class="hud-substatus" id="hudSubstatus">CALIBRATING SECURITY HUD_</p>
+      <div class="hud-progress-row">
+        <div class="hud-progress-track" role="progressbar" aria-label="Security system initialization" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="hudProgress">
+          <span id="hudProgressFill"></span>
+        </div>
+        <span class="hud-percent" id="hudPercent">0%</span>
+      </div>
+      <div class="hud-progress-ticks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+    <span class="hud-coordinate hud-coordinate-top" aria-hidden="true">PG // SYS.CALIBRATION</span>
+    <span class="hud-coordinate hud-coordinate-bottom" aria-hidden="true">SECURE CHANNEL // 256-BIT</span>
+  </div>
   <button class="cinema-skip" id="cinemaSkip" type="button">SKIP INTRO <span aria-hidden="true">↗</span></button>
   <div class="cinema-content">
     <div class="cinema-brand" id="cinemaBrand">
@@ -28,9 +50,9 @@
         </svg>
       </div>
       <p class="cinema-kicker">DEPARTMENT OF CYBER SECURITY PRESENTS</p>
-      <h1 id="cinematicTitle"><span>SYMPOSIUM</span></h1>
-      <p class="cinema-department">DEPARTMENT OF CYBER SECURITY</p>
-      <p class="cinema-tagline">CONNECT <i></i> SECURE <i></i> DEFEND</p>
+      <h1 id="cinematicTitle"><span>PHISHGUARD</span></h1>
+      <p class="cinema-department">CYBERSECURITY SYMPOSIUM</p>
+      <p class="cinema-tagline">DETECT <i></i> DEFEND <i></i> DISRUPT</p>
     </div>
     <div class="cinema-entry" id="cinemaEntry" aria-hidden="true">
       <p class="cinema-entry-label">SECURE ACCESS <span>·</span> 2026</p>
@@ -472,7 +494,7 @@
       <label>PASSWORD<input name="password" type="password" autocomplete="current-password" required></label>
       <p class="form-error" id="adminLoginError" role="alert" aria-live="polite"></p>
       <button class="btn btn-primary" type="submit">ACCESS PORTAL →</button>
-      <p class="privacy-note">Demo authentication only. A production deployment requires server-side authentication.</p>
+      <p class="privacy-note">Admin credentials are verified by the PhishGuard server and are never stored in this browser.</p>
     </form>
   </div>
 </section>
@@ -490,6 +512,16 @@
       <div class="tile"><b id="adminProgress">0</b><span>In progress</span></div>
       <div class="tile"><b id="adminAverage">—</b><span>Average score / 25</span></div>
     </div>
+    <section class="card live-monitor" aria-labelledby="liveMonitorTitle">
+      <div class="live-monitor-heading">
+        <div><p class="eyebrow">SESSION TELEMETRY</p><h3 id="liveMonitorTitle">LIVE QUIZ MONITOR</h3></div>
+        <span class="live-connection" id="monitorConnection" role="status">CONNECTING</span>
+      </div>
+      <p class="monitor-note">Tab visibility and window focus activity are recorded for review. Leaving the quiz does not submit or fail an attempt.</p>
+      <div class="live-participants" id="liveParticipants"><p class="empty">Waiting for active quiz sessions…</p></div>
+      <h4>Recent activity</h4>
+      <ol class="monitor-feed" id="monitorFeed"><li class="empty">No activity recorded yet.</li></ol>
+    </section>
     <div class="card admin-filters">
       <h3>Participants</h3>
       <div class="filter-grid">
@@ -529,9 +561,9 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="js/data.js"></script>
-<script src="js/admin-config.js"></script>
 <script src="js/data-service.js"></script>
 <script src="js/auth-service.js"></script>
+<script src="js/monitoring-service.js"></script>
 <script src="js/participant-service.js"></script>
 <script src="js/quiz-service.js"></script>
 <script src="js/cinematic-intro.js"></script>

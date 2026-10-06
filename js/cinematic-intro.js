@@ -1,12 +1,12 @@
-/* Lightweight original 3D-web-inspired canvas opening; no third-party renderer. */
+/* Lightweight responsive canvas opening; no third-party renderer or assets. */
 (function () {
   const intro = document.querySelector("#cinematicIntro");
   const canvas = document.querySelector("#cinematicCanvas");
   const context = canvas.getContext("2d", { alpha: false, desynchronized: true });
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const mobile = matchMedia("(max-width: 600px)").matches;
+  let mobile = false;
   const lowPower = navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4;
-  const particleCount = reducedMotion ? 0 : mobile || lowPower ? 38 : 82;
+  let particleCount = 0;
   const spokeCount = 20;
   const ringCount = 9;
   const pointsPerRing = 96;
@@ -19,7 +19,20 @@
   let startedAt = 0;
   let frame = 0;
   let dismissed = false;
+  let lastDisplayedProgress = -1;
   const duration = 11200;
+  const progressMilestones = [
+    { time: 0, value: 0 },
+    { time: 2200, value: 25 },
+    { time: 4600, value: 50 },
+    { time: 7000, value: 75 },
+    { time: 9100, value: 100 }
+  ];
+  const hudProgress = document.querySelector("#hudProgress");
+  const hudProgressFill = document.querySelector("#hudProgressFill");
+  const hudPercent = document.querySelector("#hudPercent");
+  const hudStatus = document.querySelector("#hudStatus");
+  const hudSubstatus = document.querySelector("#hudSubstatus");
   const swingShots = [
     { shoot: 520, attach: 790, begin: 840, end: 2830, anchor: [.76, .1], from: [.12, .67], to: [.73, .62], side: 1 },
     { shoot: 2860, attach: 3120, begin: 3180, end: 5180, anchor: [.2, .11], from: [.79, .65], to: [.18, .61], side: -1 },
@@ -43,7 +56,7 @@
 
   function revealEntry() {
     if (dismissed) return;
-    intro.classList.add("is-title", "is-network", "is-entry");
+    intro.classList.add("is-title", "is-network", "is-online", "is-entry");
     document.querySelector("#cinemaEntry").setAttribute("aria-hidden", "false");
     document.querySelector("#cinemaSkip").textContent = "CONTINUE TO SITE";
     document.querySelector("#cinemaSkip").addEventListener("click", dismiss, { once: true });
@@ -69,12 +82,14 @@
     const bounds = canvas.getBoundingClientRect();
     width = Math.max(1, bounds.width);
     height = Math.max(1, bounds.height);
-    ratio = Math.min(window.devicePixelRatio || 1, mobile ? 1 : 1.5);
+    mobile = width <= 600 || width / height < .78;
+    particleCount = reducedMotion ? 0 : mobile || lowPower ? 38 : 82;
+    ratio = Math.min(window.devicePixelRatio || 1, mobile ? 1.25 : 1.5, width > 2560 ? 1.25 : 1.5);
     canvas.width = Math.round(width * ratio);
     canvas.height = Math.round(height * ratio);
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    if (particles.length) return;
-    for (let i = 0; i < particleCount; i++) {
+    if (particles.length > particleCount) particles.length = particleCount;
+    for (let i = particles.length; i < particleCount; i++) {
       particles.push({
         x: Math.random(), y: Math.random(), z: .15 + Math.random() * .85,
         size: .4 + Math.random() * 1.5, phase: Math.random() * Math.PI * 2,
@@ -148,31 +163,74 @@
 
   function drawCity(time, camera) {
     context.save();
-    const baseline = height * .88;
-    const drift = Math.sin(time * .00032 + camera.yaw) * width * .018 - camera.trackX * width * .24;
-    context.fillStyle = "rgba(5,13,28,.74)";
-    context.beginPath();
-    context.moveTo(0, height);
-    for (let index = 0; index <= 18; index++) {
-      const x = index / 18 * width;
-      const seed = (index * 37 + 11) % 9;
-      const top = baseline - (height * (.08 + seed * .018));
-      const left = x + drift;
-      context.lineTo(left, top);
-      context.lineTo(left + width / 32, top);
-      context.lineTo(left + width / 32, height);
-    }
-    context.lineTo(0, height);
-    context.fill();
-    context.strokeStyle = "rgba(69,153,231,.14)";
-    context.lineWidth = 1;
-    for (let index = 0; index < 25; index++) {
-      const x = (index * 83 + drift + width * 2) % width;
-      const y = baseline - height * (.035 + (index % 5) * .022);
+    const baseline = height * (mobile ? .88 : .91);
+    const drift = Math.sin(time * .00032 + camera.yaw) * width * (mobile ? .012 : .028) - camera.trackX * width * .24;
+    const layers = mobile ? [{ count: 17, base: .08, spread: .21, color: "rgba(5,12,24,.78)", light: .12 }] :
+      [{ count: 30, base: .12, spread: .24, color: "rgba(4,10,22,.55)", light: .07 },
+        { count: 23, base: .1, spread: .25, color: "rgba(5,13,28,.84)", light: .16 }];
+    for (let layer = 0; layer < layers.length; layer++) {
+      const skyline = layers[layer];
+      const step = width / skyline.count;
+      const layerDrift = drift * (layer ? 1 : .45);
+      context.fillStyle = skyline.color;
       context.beginPath();
-      context.moveTo(x, y);
-      context.lineTo(x + 2, y);
-      context.stroke();
+      context.moveTo(-step, height);
+      for (let index = -1; index <= skyline.count + 1; index++) {
+        const seed = ((index * 37 + 110) % 13 + 13) % 13;
+        const buildingWidth = step * (.52 + seed % 4 * .07);
+        const top = baseline - height * (skyline.base + seed * skyline.spread / 13);
+        const left = index * step + layerDrift;
+        context.lineTo(left, top);
+        context.lineTo(left + buildingWidth, top);
+        context.lineTo(left + buildingWidth, height);
+      }
+      context.lineTo(width + step, height);
+      context.closePath();
+      context.fill();
+      context.strokeStyle = `rgba(87,174,215,${skyline.light})`;
+      context.lineWidth = 1;
+      for (let index = 0; index < skyline.count; index++) {
+        const seed = ((index * 37 + 110) % 13 + 13) % 13;
+        const buildingWidth = step * (.52 + seed % 4 * .07);
+        const left = index * step + layerDrift;
+        const top = baseline - height * (skyline.base + seed * skyline.spread / 13);
+        context.beginPath();
+        context.moveTo(left + buildingWidth, top);
+        context.lineTo(left + buildingWidth, baseline + height * .08);
+        context.stroke();
+        for (let row = 0; row < 5; row++) {
+          const windowY = top + (row + 1) * Math.max(4, height * .018);
+          if (windowY >= baseline) continue;
+          context.fillStyle = (index * 5 + row * 3) % 7 < 2
+            ? `rgba(96,209,241,${skyline.light * 2.4})`
+            : `rgba(255,66,95,${skyline.light * .48})`;
+          context.fillRect(left + step * .12, windowY, Math.max(1, buildingWidth * .16), Math.max(1, height * .003));
+          context.fillRect(left + buildingWidth * .56, windowY, Math.max(1, buildingWidth * .16), Math.max(1, height * .003));
+        }
+      }
+    }
+    if (!mobile && time > 3600) {
+      const depth = smooth((time - 3600) / 2200);
+      context.save();
+      context.globalAlpha = depth * .24;
+      context.strokeStyle = "#75d8ff";
+      for (let side = 0; side < 2; side++) {
+        const x = side ? width : 0;
+        context.lineWidth = width * .025;
+        context.beginPath();
+        context.moveTo(x, height * .34);
+        context.lineTo(side ? width * .91 : width * .09, height);
+        context.stroke();
+        context.lineWidth = 1;
+        for (let floor = 0; floor < 8; floor++) {
+          const y = height * (.42 + floor * .075);
+          context.beginPath();
+          context.moveTo(side ? width * (.91 + floor * .011) : width * (.09 - floor * .011), y);
+          context.lineTo(x, y + height * .015);
+          context.stroke();
+        }
+      }
+      context.restore();
     }
     context.restore();
   }
@@ -198,6 +256,7 @@
 
   function drawSilhouette(x, y, scale, angle, pose, alpha) {
     const unit = Math.min(width, height) * scale;
+    const detailed = alpha > .2;
     context.save();
     context.translate(x, y);
     context.rotate(angle);
@@ -205,16 +264,20 @@
     context.globalAlpha = alpha;
     context.lineCap = "round";
     context.lineJoin = "round";
-
-    const fabric = context.createLinearGradient(-.3, -.5, .34, .45);
-    fabric.addColorStop(0, "#172538");
-    fabric.addColorStop(.28, "#091322");
-    fabric.addColorStop(.62, "#030811");
-    fabric.addColorStop(.83, "#102237");
-    fabric.addColorStop(1, "#050a12");
-    const steel = "#030811";
-    const seamBlue = "rgba(82,190,255,.68)";
-    const seamRed = "rgba(255,73,111,.7)";
+    const redSuit = context.createLinearGradient(-.25, -.42, .23, .26);
+    redSuit.addColorStop(0, "#ff5363");
+    redSuit.addColorStop(.2, "#a9142c");
+    redSuit.addColorStop(.46, "#4e0a1a");
+    redSuit.addColorStop(.72, "#bd1b31");
+    redSuit.addColorStop(1, "#310815");
+    const blueSuit = context.createLinearGradient(-.22, -.25, .24, .48);
+    blueSuit.addColorStop(0, "#37a2d5");
+    blueSuit.addColorStop(.18, "#17476e");
+    blueSuit.addColorStop(.52, "#07182c");
+    blueSuit.addColorStop(.78, "#102d4b");
+    blueSuit.addColorStop(1, "#030b16");
+    const seamBlue = "rgba(119,213,255,.62)";
+    const seamRed = "rgba(255,128,139,.6)";
 
     const linePath = points => {
       context.beginPath();
@@ -227,145 +290,252 @@
       const last = points[points.length - 1];
       context.lineTo(last[0], last[1]);
     };
-    const limb = (points, lineWidth, glow, highlight) => {
-      linePath(points);
-      context.lineCap = "round";
-      context.lineJoin = "round";
-      context.strokeStyle = steel;
-      context.lineWidth = lineWidth;
-      context.shadowColor = glow;
-      context.shadowBlur = 9;
+    const limb = (points, lineWidth, material, seam, highlight) => {
+      const radii = [lineWidth * .49, lineWidth * .38, lineWidth * .23];
+      const edges = points.map((point, index) => {
+        const before = points[Math.max(0, index - 1)];
+        const after = points[Math.min(points.length - 1, index + 1)];
+        const dx = after[0] - before[0];
+        const dy = after[1] - before[1];
+        const length = Math.hypot(dx, dy) || 1;
+        const normal = [-dy / length, dx / length];
+        return [
+          [point[0] + normal[0] * radii[index], point[1] + normal[1] * radii[index]],
+          [point[0] - normal[0] * radii[index], point[1] - normal[1] * radii[index]]
+        ];
+      });
+      const limbPath = () => {
+        context.beginPath();
+        context.moveTo(edges[0][0][0], edges[0][0][1]);
+        context.quadraticCurveTo(edges[1][0][0], edges[1][0][1], edges[2][0][0], edges[2][0][1]);
+        context.lineTo(edges[2][1][0], edges[2][1][1]);
+        context.quadraticCurveTo(edges[1][1][0], edges[1][1][1], edges[0][1][0], edges[0][1][1]);
+        context.closePath();
+      };
+      limbPath();
+      context.fillStyle = "#020711";
+      context.strokeStyle = "rgba(1,4,10,.94)";
+      context.lineWidth = detailed ? .014 : .008;
+      context.shadowColor = "#02050b";
+      context.shadowBlur = detailed ? 8 : 3;
+      context.fill();
       context.stroke();
       context.shadowBlur = 0;
+      limbPath();
+      context.fillStyle = material;
+      context.fill();
+      if (!detailed) return;
+
+      context.save();
+      limbPath();
+      context.clip();
+      const surface = context.createLinearGradient(-lineWidth, 0, lineWidth, 0);
+      surface.addColorStop(0, "rgba(0,4,12,.52)");
+      surface.addColorStop(.28, highlight);
+      surface.addColorStop(.52, "rgba(255,255,255,.1)");
+      surface.addColorStop(.8, seam);
+      surface.addColorStop(1, "rgba(0,4,12,.55)");
+      context.globalAlpha = alpha * .72;
+      context.strokeStyle = surface;
+      context.lineWidth = lineWidth * .12;
       linePath(points);
-      context.strokeStyle = fabric;
-      context.lineWidth = lineWidth * .71;
       context.stroke();
-      linePath(points);
-      context.strokeStyle = highlight;
-      context.globalAlpha *= .72;
-      context.lineWidth = .009;
-      context.stroke();
-      context.globalAlpha = alpha;
-      const start = points[0], end = points[points.length - 1];
-      for (const joint of [start, end]) {
-        context.fillStyle = fabric;
-        context.strokeStyle = glow;
-        context.lineWidth = .009;
+      context.globalAlpha = alpha * .3;
+      context.strokeStyle = seam;
+      context.lineWidth = .003;
+      for (let stitch = 0; stitch < 5; stitch++) {
+        const t = (stitch + 1) / 6;
+        const centerX = (1 - t) * (1 - t) * points[0][0] +
+          2 * (1 - t) * t * points[1][0] + t * t * points[2][0];
+        const centerY = (1 - t) * (1 - t) * points[0][1] +
+          2 * (1 - t) * t * points[1][1] + t * t * points[2][1];
         context.beginPath();
-        context.arc(joint[0], joint[1], lineWidth * .43, 0, Math.PI * 2);
-        context.fill();
+        context.moveTo(centerX - lineWidth * .25, centerY);
+        context.quadraticCurveTo(centerX, centerY + lineWidth * .06, centerX + lineWidth * .25, centerY);
         context.stroke();
       }
+      context.restore();
+      context.globalAlpha = alpha;
+      context.strokeStyle = seam;
+      context.lineWidth = .004;
+      context.beginPath();
+      context.moveTo(edges[1][0][0], edges[1][0][1]);
+      context.quadraticCurveTo(points[1][0], points[1][1], edges[1][1][0], edges[1][1][1]);
+      context.stroke();
     };
-    const fillPanel = (path, stroke, lineWidth) => {
+    const fillPanel = (path, material, stroke, lineWidth) => {
       context.beginPath();
       path();
-      context.fillStyle = fabric;
+      context.fillStyle = material;
       context.strokeStyle = stroke;
       context.lineWidth = lineWidth;
-      context.shadowColor = stroke;
-      context.shadowBlur = 9;
+      context.shadowColor = "#020711";
+      context.shadowBlur = detailed ? 8 : 3;
       context.fill();
       context.stroke();
       context.shadowBlur = 0;
     };
 
-    limb(pose.backArm, .092, "#276aff", seamBlue);
-    limb(pose.backLeg, .112, "#ef355f", seamRed);
-    limb(pose.freeLeg, .112, "#247fff", seamBlue);
-    limb(pose.webArm, .092, "#ff426e", seamRed);
+    limb(pose.backArm, .105, redSuit, seamRed, "rgba(255,174,165,.65)");
+    limb(pose.backLeg, .125, blueSuit, seamBlue, "rgba(158,223,255,.55)");
+    limb(pose.freeLeg, .12, blueSuit, seamBlue, "rgba(158,223,255,.55)");
+    limb(pose.webArm, .1, redSuit, seamRed, "rgba(255,174,165,.65)");
 
-    fillPanel(() => {
-      context.moveTo(-.105, -.2);
-      context.quadraticCurveTo(-.16, -.15, -.145, -.04);
-      context.lineTo(-.112, .15);
-      context.quadraticCurveTo(-.08, .23, -.018, .235);
-      context.lineTo(.045, .235);
-      context.quadraticCurveTo(.12, .2, .137, .1);
-      context.lineTo(.135, -.105);
-      context.quadraticCurveTo(.12, -.21, .072, -.23);
-      context.lineTo(-.06, -.225);
+    const torso = () => {
+      context.beginPath();
+      context.moveTo(-.067, -.29);
+      context.quadraticCurveTo(-.115, -.27, -.159, -.221);
+      context.quadraticCurveTo(-.179, -.19, -.158, -.127);
+      context.lineTo(-.124, .115);
+      context.quadraticCurveTo(-.102, .205, -.069, .239);
+      context.quadraticCurveTo(0, .267, .069, .239);
+      context.quadraticCurveTo(.102, .205, .124, .115);
+      context.lineTo(.158, -.127);
+      context.quadraticCurveTo(.179, -.19, .159, -.221);
+      context.quadraticCurveTo(.115, -.27, .067, -.29);
       context.closePath();
-    }, "rgba(101,185,244,.65)", .014);
+    };
+    fillPanel(torso, blueSuit, "rgba(101,191,229,.55)", .01);
 
     context.save();
-    context.globalAlpha = .57;
-    context.strokeStyle = seamBlue;
-    context.lineWidth = .008;
     context.beginPath();
-    context.moveTo(-.074, -.188); context.quadraticCurveTo(-.04, -.1, -.063, .052);
-    context.moveTo(.074, -.19); context.quadraticCurveTo(.03, -.06, .086, .105);
-    context.moveTo(-.096, -.078); context.quadraticCurveTo(0, -.028, .116, -.072);
-    context.moveTo(-.099, .097); context.quadraticCurveTo(0, .13, .116, .084);
-    context.stroke();
-    context.globalAlpha = .37;
-    context.strokeStyle = "rgba(185,211,233,.62)";
+    torso();
+    context.clip();
+    context.fillStyle = redSuit;
     context.beginPath();
-    context.moveTo(-.056, -.14); context.quadraticCurveTo(-.026, -.124, -.04, -.084);
-    context.moveTo(.046, .005); context.quadraticCurveTo(.022, .026, .045, .051);
-    context.moveTo(-.015, .162); context.quadraticCurveTo(.005, .145, .022, .167);
-    context.stroke();
-    context.restore();
-
-    fillPanel(() => {
-      context.moveTo(-.075, -.28);
-      context.quadraticCurveTo(-.12, -.43, -.07, -.49);
-      context.quadraticCurveTo(0, -.548, .074, -.49);
-      context.quadraticCurveTo(.118, -.427, .078, -.28);
-      context.lineTo(.045, -.238);
-      context.quadraticCurveTo(0, -.216, -.05, -.244);
-      context.closePath();
-    }, "rgba(93,196,255,.86)", .014);
-
-    context.strokeStyle = "rgba(132,190,235,.52)";
-    context.lineWidth = .007;
-    context.beginPath();
-    context.moveTo(-.08, -.414); context.quadraticCurveTo(0, -.45, .08, -.414);
-    context.moveTo(-.062, -.29); context.quadraticCurveTo(0, -.26, .06, -.29);
-    context.stroke();
-
-    const lens = (side) => {
+    context.moveTo(-.164, -.216);
+    context.quadraticCurveTo(-.075, -.315, 0, -.24);
+    context.quadraticCurveTo(.075, -.315, .164, -.216);
+    context.lineTo(.118, -.034);
+    context.quadraticCurveTo(.06, .004, 0, -.009);
+    context.quadraticCurveTo(-.06, .004, -.118, -.034);
+    context.closePath();
+    context.fill();
+    if (detailed) {
+      context.globalAlpha = alpha * .44;
+      context.strokeStyle = "rgba(255,177,163,.76)";
+      context.lineWidth = .0035;
+      for (let row = 0; row < 7; row++) {
+        const yLine = -.251 + row * .031;
+        const span = .058 + row * .013;
+        context.beginPath();
+        context.moveTo(-span, yLine);
+        context.quadraticCurveTo(0, yLine + .012, span, yLine);
+        context.stroke();
+      }
+      for (let ray = -5; ray <= 5; ray++) {
+        context.beginPath();
+        context.moveTo(0, -.247);
+        context.quadraticCurveTo(ray * .018, -.14, ray * .03, -.025);
+        context.stroke();
+      }
+      context.globalAlpha = alpha * .18;
+      context.strokeStyle = "rgba(255,210,201,.9)";
+      context.lineWidth = .0018;
+      for (let row = 0; row < 8; row++) {
+        const yLine = -.231 + row * .027;
+        for (let column = -3; column <= 3; column++) {
+          const xLine = column * .019 + (row % 2) * .0095;
+          context.beginPath();
+          context.moveTo(xLine - .007, yLine - .004);
+          context.lineTo(xLine + .007, yLine + .004);
+          context.stroke();
+        }
+      }
+      context.globalAlpha = alpha * .52;
+      context.strokeStyle = "rgba(10,25,43,.9)";
+      context.lineWidth = .008;
       context.beginPath();
-      context.moveTo(side * .008, -.389);
-      context.quadraticCurveTo(side * .035, -.427, side * .08, -.4);
-      context.lineTo(side * .057, -.368);
-      context.quadraticCurveTo(side * .031, -.357, side * .008, -.379);
-      context.closePath();
-      const reflection = context.createLinearGradient(0, -.43, 0, -.36);
-      reflection.addColorStop(0, "#d8fbff");
-      reflection.addColorStop(.28, "#58dfff");
-      reflection.addColorStop(1, "#0875c4");
-      context.fillStyle = reflection;
-      context.shadowColor = "#3dd9ff";
-      context.shadowBlur = 8;
-      context.fill();
-      context.shadowBlur = 0;
-      context.strokeStyle = "rgba(232,251,255,.88)";
-      context.lineWidth = .005;
+      context.moveTo(-.116, -.015); context.quadraticCurveTo(-.055, .023, -.057, .105);
+      context.moveTo(.116, -.015); context.quadraticCurveTo(.055, .023, .057, .105);
       context.stroke();
-    };
-    lens(-1);
-    lens(1);
+      context.globalAlpha = alpha * .55;
+      context.strokeStyle = "rgba(141,218,245,.58)";
+      context.lineWidth = .003;
+      context.beginPath();
+      context.moveTo(-.1, -.175); context.quadraticCurveTo(-.074, -.15, -.082, -.12);
+      context.moveTo(.1, -.175); context.quadraticCurveTo(.074, -.15, .082, -.12);
+      context.moveTo(-.078, .166); context.quadraticCurveTo(-.04, .198, -.018, .203);
+      context.moveTo(.078, .166); context.quadraticCurveTo(.04, .198, .018, .203);
+      context.stroke();
+    }
+    context.restore();
+    context.globalAlpha = alpha;
 
     fillPanel(() => {
-      context.moveTo(-.112, .133);
-      context.quadraticCurveTo(-.02, .175, .11, .13);
-      context.lineTo(.079, .275);
-      context.quadraticCurveTo(.17, .34, .12, .365);
-      context.lineTo(.047, .344);
-      context.lineTo(0, .282);
-      context.lineTo(-.055, .351);
-      context.quadraticCurveTo(-.158, .35, -.139, .307);
-      context.lineTo(-.068, .247);
+      context.moveTo(-.071, -.287);
+      context.quadraticCurveTo(-.107, -.36, -.083, -.441);
+      context.quadraticCurveTo(-.055, -.521, 0, -.528);
+      context.quadraticCurveTo(.055, -.521, .083, -.441);
+      context.quadraticCurveTo(.107, -.36, .071, -.287);
+      context.quadraticCurveTo(0, -.257, -.071, -.287);
       context.closePath();
-    }, "rgba(255,77,111,.48)", .01);
+    }, redSuit, "rgba(255,132,139,.75)", .009);
 
-    context.strokeStyle = "rgba(114,201,255,.67)";
-    context.lineWidth = .007;
+    if (detailed) {
+      context.save();
+      context.beginPath();
+      context.moveTo(-.077, -.44);
+      context.quadraticCurveTo(0, -.475, .077, -.44);
+      context.quadraticCurveTo(.055, -.36, 0, -.344);
+      context.quadraticCurveTo(-.055, -.36, -.077, -.44);
+      context.clip();
+      const lens = side => {
+        context.beginPath();
+        context.moveTo(side * .008, -.425);
+        context.quadraticCurveTo(side * .034, -.455, side * .071, -.433);
+        context.quadraticCurveTo(side * .057, -.391, side * .021, -.388);
+        context.closePath();
+        const reflection = context.createLinearGradient(0, -.455, 0, -.384);
+        reflection.addColorStop(0, "#ffffff");
+        reflection.addColorStop(.32, "#d8f7ff");
+        reflection.addColorStop(.75, "#94b9c9");
+        reflection.addColorStop(1, "#395d70");
+        context.fillStyle = reflection;
+        context.shadowColor = "#a7f1ff";
+        context.shadowBlur = 5;
+        context.fill();
+        context.shadowBlur = 0;
+        context.strokeStyle = "rgba(255,255,255,.92)";
+        context.lineWidth = .004;
+        context.stroke();
+        context.strokeStyle = "rgba(13,31,47,.82)";
+        context.lineWidth = .002;
+        context.stroke();
+      };
+      lens(-1);
+      lens(1);
+      context.restore();
+      context.globalAlpha = alpha * .55;
+      context.strokeStyle = "rgba(255,190,180,.72)";
+      context.lineWidth = .003;
+      context.beginPath();
+      context.moveTo(-.044, -.47); context.quadraticCurveTo(0, -.43, .044, -.47);
+      context.moveTo(-.067, -.392); context.quadraticCurveTo(0, -.349, .067, -.392);
+      context.stroke();
+      context.globalAlpha = alpha;
+
+      context.save();
+      context.globalAlpha = alpha * .4;
+      context.strokeStyle = "rgba(255,208,194,.78)";
+      context.lineWidth = .0025;
+      context.beginPath();
+      context.moveTo(-.126, -.189); context.lineTo(-.098, -.164);
+      context.moveTo(.126, -.189); context.lineTo(.098, -.164);
+      context.moveTo(-.093, .132); context.lineTo(-.065, .157);
+      context.moveTo(.093, .132); context.lineTo(.065, .157);
+      context.stroke();
+      context.restore();
+    }
+
+    context.globalAlpha = alpha * (detailed ? .22 : .12);
+    context.strokeStyle = "#e8f4ff";
+    context.lineWidth = .003;
     context.beginPath();
-    context.moveTo(-.094, .173); context.quadraticCurveTo(-.045, .245, -.12, .307);
-    context.moveTo(.094, .169); context.quadraticCurveTo(.036, .239, .116, .319);
+    context.moveTo(-.18, -.208); context.quadraticCurveTo(-.219, -.11, -.176, -.035);
+    context.moveTo(.18, -.208); context.quadraticCurveTo(.219, -.11, .176, -.035);
+    context.moveTo(-.08, -.287); context.quadraticCurveTo(-.14, -.21, -.127, -.13);
+    context.moveTo(.08, -.287); context.quadraticCurveTo(.14, -.21, .127, -.13);
     context.stroke();
     context.restore();
   }
@@ -632,6 +802,29 @@
     if (dismissed || !context) return;
     if (!startedAt) startedAt = time;
     const elapsed = reducedMotion || frozen ? duration : time - startedAt;
+    let lowerMilestone = progressMilestones[0];
+    let upperMilestone = progressMilestones[progressMilestones.length - 1];
+    for (let index = 1; index < progressMilestones.length; index++) {
+      if (elapsed < progressMilestones[index].time) {
+        upperMilestone = progressMilestones[index];
+        lowerMilestone = progressMilestones[index - 1];
+        break;
+      }
+    }
+    const progressFraction = clamp((elapsed - lowerMilestone.time) /
+      Math.max(1, upperMilestone.time - lowerMilestone.time), 0, 1);
+    const progress = Math.round(lowerMilestone.value +
+      (upperMilestone.value - lowerMilestone.value) * progressFraction);
+    if (progress !== lastDisplayedProgress) {
+      lastDisplayedProgress = progress;
+      hudProgress.setAttribute("aria-valuenow", String(progress));
+      hudProgressFill.style.width = `${progress}%`;
+      hudPercent.textContent = `${progress}%`;
+      if (progress >= 100) {
+        hudStatus.textContent = "SECURITY SYSTEM ONLINE_";
+        hudSubstatus.textContent = "THREAT MONITORING ACTIVE_";
+      }
+    }
     const formation = smooth((elapsed - 300) / 3450);
     const network = smooth((elapsed - 4930) / 3000);
     const flyIn = smooth((elapsed - 5520) / 2300);
@@ -666,8 +859,8 @@
     drawFinalWebTransition(elapsed);
 
     if (elapsed > 0 && elapsed < 1800) intro.classList.add("is-thread");
-    if (elapsed >= 8120) intro.classList.add("is-network", "is-title");
-    if (elapsed >= 9540) {
+    if (elapsed >= 9100) intro.classList.add("is-network", "is-online", "is-title");
+    if (elapsed >= 10000) {
       intro.classList.add("is-entry");
       document.querySelector("#cinemaEntry").setAttribute("aria-hidden", "false");
       if (document.activeElement === document.body || document.activeElement.id === "cinemaSkip") {
@@ -688,7 +881,7 @@
   window.addEventListener("resize", resize, { passive: true });
   resize();
   if (reducedMotion) {
-    intro.classList.add("is-title", "is-network", "is-entry");
+    intro.classList.add("is-title", "is-network", "is-online", "is-entry");
     document.querySelector("#cinemaEntry").setAttribute("aria-hidden", "false");
     render(performance.now(), true);
     intro.querySelector("[data-go='participant-details']").focus({ preventScroll: true });

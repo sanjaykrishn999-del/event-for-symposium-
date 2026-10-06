@@ -12,32 +12,61 @@ messages, login pages and QR scenarios and decide whether each one is
 
 ## Running it
 
-No build step, no install, no internet connection.
+The quiz and monitoring API run on Node.js 20 or newer. Install dependencies
+once with `npm install`, then configure the server-only admin ID, salted
+scrypt password hash, and session signing secret in a local, Git-ignored `.env`
+file before starting the application.
 
-    Open index.html in any modern browser.
+PowerShell:
 
-For a reliable localStorage experience, serve the folder over localhost.
+    $env:PHISHGUARD_ADMIN_ID = "organizer"
+    $env:PHISHGUARD_ADMIN_PASSWORD_HASH = "scrypt$<32-hex-salt>$<128-hex-key>"
+    $secretBytes = New-Object byte[] 32
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($secretBytes)
+    $env:PHISHGUARD_SESSION_SECRET = [Convert]::ToBase64String($secretBytes)
+    $rng.Dispose()
+    npm install
+    npm start
 
-The opening screen plays an original, lightweight animated web-swing sequence
-with an abstract masked silhouette, three web shots, and a web-to-network
-transition before the separate participant and admin entry. The canvas artwork
-is deliberately stylized rather than photorealistic. The intro can be skipped
-and respects reduced-motion preferences.
+Open `http://localhost:8000`. Monitoring data and server sessions are stored in
+`data/phishguard.sqlite`. Set `PORT` to change the listener. For deployment,
+use HTTPS, persistent disk for SQLite, a strong private session secret, and a
+trusted reverse proxy only when setting `TRUST_PROXY=1`. Do not expose the admin password, password hash, or session secret to browser
+code or commit them. The password hash uses a random 16-byte salt and a 64-byte
+`crypto.scryptSync` key; keep the hash in `.env` and do not put the password
+itself in the configuration file.
+The server binds to `127.0.0.1` by default. For testing on a trusted LAN,
+set `HOST=0.0.0.0` and open the computer's LAN address from the mobile device;
+do not expose an unencrypted deployment to an untrusted network.
+
+The static `python -m http.server` workflow is not suitable for quiz monitoring:
+it has no authenticated API or server-side database.
+Run the API and security tests with `npm test` after dependencies are installed.
+
+The opening screen plays an original, lightweight canvas web-swing sequence
+behind a rotating cybersecurity calibration HUD. Its responsive city framing,
+web shots, progress milestones, and web-to-network transition lead into the
+participant and admin entry. The artwork is a custom 2D canvas interpretation,
+not a photorealistic 3D render; it uses no external assets or libraries. The
+intro can be skipped and respects reduced-motion preferences.
 
 Choose **ENTER SYMPOSIUM** to enter participant details and start the 25-question
 competition. Answers and participant details are saved locally without
 correct/incorrect feedback or scores being shown to the participant. Choose
 **ADMIN LOGIN** to review attempts, question-wise answers, and export CSV files.
+The admin portal also displays server-recorded tab visibility, focus, fullscreen,
+question progress, and return events for active quizzes. Activity is telemetry
+only: leaving the tab never fails an attempt or changes an answer. Browser
+events are client-reported signals and do not reveal what a participant did in
+another tab; they are not tamper-proof proof of misconduct.
 
 ### Optional: serving it over http
 
 The service worker in `sw.js` adds installable-PWA behaviour, but browsers only
-register service workers over `http://` or `https://`. From a folder:
-
-    python3 -m http.server 8000     # then open http://localhost:8000
-
-Opening `index.html` directly still works offline — the registration is skipped
-automatically and nothing breaks.
+register service workers over `http://` or `https://`. The monitoring API
+bypasses the offline cache; the server must be running to create and review
+monitoring records.
 
 ---
 
@@ -47,14 +76,15 @@ automatically and nothing breaks.
     css/styles.css          Design tokens, layout, mockup chrome, animations
     js/data.js              All content: scenarios, hunts, comparisons, lessons
     js/app.js               Existing learning activities and shared screen router
-    js/admin-config.js      Demo-only admin ID and password configuration
+    server.js               Admin-authenticated monitoring API and SQLite store
+    js/monitoring-service.js Browser lifecycle events and admin SSE client
     js/data-service.js      Local storage adapter for participant attempts
-    js/auth-service.js      Demo admin session handling
+    js/auth-service.js      Server-backed admin session handling
     js/participant-service.js Participant IDs and attempt persistence
     js/quiz-service.js      Three-round selection and internal scoring
     js/cinematic-intro.js   Lightweight animated opening and access screen
     js/portal.js            Registration, competition flow, admin dashboard
-    sw.js                   Optional offline cache (http only)
+    sw.js                   Offline cache for static assets (http only)
     manifest.webmanifest    PWA metadata
     assets/icon.svg         App icon
 
@@ -131,10 +161,19 @@ This is a simulator. It never becomes the thing it teaches about.
 - Participant details, attempts, and the admin session are held in browser
   storage for this local demonstration. Do not use real sensitive data in a
   production deployment.
-- `js/admin-config.js` ships with empty values. Set local demonstration
-  credentials there before using the admin login, and do not commit real
-  credentials. Client-side credentials and localStorage are not secure: deploy
-  backend authentication and a database before using real participant data.
+- Admin identity is checked on the server using `PHISHGUARD_ADMIN_ID` and the
+  salted scrypt hash in `PHISHGUARD_ADMIN_PASSWORD_HASH`; browser storage and
+  source files do not contain admin credentials. Admin sessions use server-side
+  SQLite storage and HTTP-only, same-site cookies. Restrict access to the
+  server and use HTTPS.
+- Monitoring events are stored separately from participant answer records.
+  The server assigns event timestamps and appends activity; a participant can
+  report browser lifecycle events only for their own server-issued session.
+  The browser cannot reliably report hidden-tab activity if the device loses
+  connectivity or is forcibly terminated.
+- Participant answers and attempt details remain in localStorage in this demo.
+  For production handling of real participant data, move quiz submissions and
+  participant identity to a trusted server-side workflow as well.
 - Existing learning, red-flag hunt, website comparison, and nickname leaderboard
   features remain available.
 

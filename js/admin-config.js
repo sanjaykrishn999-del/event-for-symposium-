@@ -1,5 +1,2 @@
-/* Set local demonstration credentials here; do not commit real credentials. */
-window.adminConfig = Object.freeze({
-  adminId: "",
-  password: ""
-});
+/* Admin credentials are configured only in the server environment. */
+window.adminConfig = Object.freeze({});
