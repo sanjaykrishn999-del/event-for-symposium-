@@ -421,6 +421,7 @@ body.sympo .wrap{width:min(1280px,94vw);}
 .participant-form input::placeholder,.filter-grid input::placeholder{color:var(--dim);}
 .participant-form .privacy-note{color:var(--dim);font-size:.83rem;margin:0;}
 .form-error{min-height:1.4em;color:#ff9aa8;margin:0;font-size:.9rem;}
+.monitoring-sync-warning{padding:10px 12px;border:1px solid rgba(255,154,168,.35);border-radius:8px;background:rgba(255,77,100,.06);}
 .transition-card{text-align:center;padding:clamp(26px,6vw,54px);}
 .transition-card .lede{margin:0 auto 22px;}
 .admin-wrap{width:min(1440px,94vw);}

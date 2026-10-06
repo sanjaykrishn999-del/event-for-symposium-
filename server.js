@@ -53,6 +53,13 @@ function parseRoundQuestion(body) {
   return { round, questionNumber };
 }
 
+function deviceType(userAgent = "") {
+  if (/ipad|tablet|kindle|silk/i.test(userAgent)) return "TABLET";
+  if (/mobile|iphone|ipod|android/i.test(userAgent)) return "MOBILE";
+  if (userAgent) return "DESKTOP";
+  return "UNKNOWN";
+}
+
 function createDatabase(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
@@ -68,11 +75,14 @@ function createDatabase(dbPath) {
     CREATE TABLE IF NOT EXISTS quiz_monitor_sessions (
       quiz_session_id TEXT PRIMARY KEY,
       participant_id TEXT NOT NULL,
+      client_start_id TEXT,
       participant_name TEXT NOT NULL,
       college TEXT NOT NULL,
       email TEXT NOT NULL,
+      phone TEXT NOT NULL DEFAULT '',
       department TEXT NOT NULL,
       year TEXT NOT NULL,
+      device_type TEXT NOT NULL DEFAULT 'UNKNOWN',
       owner_sid TEXT NOT NULL,
       current_round INTEGER NOT NULL DEFAULT 1,
       current_question INTEGER NOT NULL DEFAULT 1,
@@ -104,6 +114,18 @@ function createDatabase(dbPath) {
     CREATE INDEX IF NOT EXISTS monitor_events_recent
       ON quiz_monitor_events(timestamp DESC);
   `);
+  const sessionColumns = db.pragma("table_info(quiz_monitor_sessions)");
+  if (!sessionColumns.some(column => column.name === "client_start_id")) {
+    db.exec("ALTER TABLE quiz_monitor_sessions ADD COLUMN client_start_id TEXT");
+  }
+  if (!sessionColumns.some(column => column.name === "phone")) {
+    db.exec("ALTER TABLE quiz_monitor_sessions ADD COLUMN phone TEXT NOT NULL DEFAULT ''");
+  }
+  if (!sessionColumns.some(column => column.name === "device_type")) {
+    db.exec("ALTER TABLE quiz_monitor_sessions ADD COLUMN device_type TEXT NOT NULL DEFAULT 'UNKNOWN'");
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS monitor_sessions_client_start
+    ON quiz_monitor_sessions(client_start_id) WHERE client_start_id IS NOT NULL`);
   const eventColumns = db.pragma("table_info(quiz_monitor_events)");
   if (!eventColumns.some(column => column.name === "client_event_id")) {
     db.exec("ALTER TABLE quiz_monitor_events ADD COLUMN client_event_id TEXT");
@@ -197,14 +219,17 @@ function createApp(options = {}) {
   const statements = {
     insertSession: db.prepare(`
       INSERT INTO quiz_monitor_sessions (
-        quiz_session_id, participant_id, participant_name, college, email, department, year,
+        quiz_session_id, participant_id, client_start_id, participant_name, college, email, phone, department, year,
+        device_type,
         owner_sid, current_round, current_question, current_state, created_at, updated_at,
         last_activity, last_event
       ) VALUES (
-        @quizSessionId, @participantId, @participantName, @college, @email, @department, @year,
+        @quizSessionId, @participantId, @clientStartId, @participantName, @college, @email, @phone, @department, @year,
+        @deviceType,
         @ownerSid, @round, @questionNumber, 'ACTIVE', @timestamp, @timestamp, @timestamp, @eventType
       )
     `),
+    findStartRequest: db.prepare("SELECT * FROM quiz_monitor_sessions WHERE client_start_id = ?"),
     findOwnedSession: db.prepare(`
       SELECT * FROM quiz_monitor_sessions WHERE quiz_session_id = ? AND owner_sid = ?
     `),
@@ -232,14 +257,18 @@ function createApp(options = {}) {
       ORDER BY last_activity DESC
     `),
     recentEvents: db.prepare(`
-      SELECT participant_id, participant_name, quiz_session_id, round, question_number,
+      SELECT event_id, participant_id, participant_name, quiz_session_id, round, question_number,
         event_type, timestamp, duration_seconds
       FROM quiz_monitor_events WHERE timestamp >= ? AND event_type != 'QUIZ_PROGRESS'
       ORDER BY event_id DESC LIMIT 50
+    `),
+    updateOwner: db.prepare(`
+      UPDATE quiz_monitor_sessions SET owner_sid = ? WHERE quiz_session_id = ?
     `)
   };
   const adminStreams = new Map();
   const staleTimers = new Map();
+  const backendInstanceId = crypto.randomUUID();
   app.disable("x-powered-by");
   app.set("trust proxy", options.trustProxy ??
     (process.env.NODE_ENV === "production" || process.env.TRUST_PROXY === "1" || process.env.RENDER === "true"
@@ -291,8 +320,8 @@ function createApp(options = {}) {
   }
   function monitorStatus(row, now = Date.now()) {
     if (row.current_state === "COMPLETED") return "COMPLETED";
-    if (row.current_state === "AWAY") return "AWAY";
     if (now - new Date(row.last_activity).getTime() > STALE_AFTER_MS) return "STALE";
+    if (row.current_state === "AWAY") return "AWAY";
     if (row.tab_switches || row.focus_losses || row.fullscreen_exits) return "ATTENTION";
     return "ACTIVE";
   }
@@ -301,31 +330,19 @@ function createApp(options = {}) {
     const now = Date.now();
     return {
       serverTime: serverTimestamp(),
-      participants: statements.activeSessions.all(cutoff).map(row => ({
-        quizSessionId: row.quiz_session_id,
-        participantId: row.participant_id,
-        participantName: row.participant_name,
-        college: row.college,
-        email: row.email,
-        department: row.department,
-        year: row.year,
-        round: row.current_round,
-        questionNumber: row.current_question,
-        quizStatus: "In Progress",
-        tabSwitches: row.tab_switches,
-        focusLosses: row.focus_losses,
-        fullscreenExits: row.fullscreen_exits,
-        returns: row.returns,
-        lastActivity: row.last_activity,
-        lastEvent: row.last_event,
-        currentStatus: monitorStatus(row, now)
-      })),
+      backendInstanceId,
+      participants: statements.activeSessions.all(cutoff).map(row => snapshotParticipant(row, now)),
       events: statements.recentEvents.all(cutoff)
     };
   }
-  function publish() {
-    if (adminStreams.size === 0) return;
-    const payload = `event: monitor\ndata: ${JSON.stringify(snapshot())}\n\n`;
+  function publishParticipant(row, event = null) {
+    if (!row || adminStreams.size === 0) return;
+    const isVisible = row.current_state !== "COMPLETED" &&
+      Date.now() - new Date(row.created_at).getTime() <= ACTIVE_WINDOW_MS;
+    const message = isVisible
+      ? { type: "upsert", participant: snapshotParticipant(row), event }
+      : { type: "remove", quizSessionId: row.quiz_session_id, event };
+    const payload = `event: monitor\ndata: ${JSON.stringify(message)}\n\n`;
     for (const response of adminStreams.keys()) {
       if (!response.write(payload)) {
         response.end();
@@ -333,17 +350,54 @@ function createApp(options = {}) {
       }
     }
   }
+  function snapshotParticipant(row, now = Date.now()) {
+    return {
+      quizSessionId: row.quiz_session_id,
+      participantId: row.participant_id,
+      participantName: row.participant_name,
+      college: row.college,
+      email: row.email,
+      phone: row.phone,
+      department: row.department,
+      year: row.year,
+      deviceType: row.device_type,
+      loginTime: row.created_at,
+      round: row.current_round,
+      questionNumber: row.current_question,
+      quizStatus: "In Progress",
+      tabSwitches: row.tab_switches,
+      focusLosses: row.focus_losses,
+      fullscreenExits: row.fullscreen_exits,
+      returns: row.returns,
+      lastActivity: row.last_activity,
+      lastEvent: row.last_event,
+      currentStatus: monitorStatus(row, now)
+    };
+  }
+  function monitorEvent(row, eventType, timestamp, round, questionNumber, durationSeconds, eventId) {
+    return {
+      event_id: eventId,
+      participant_id: row.participant_id,
+      participant_name: row.participant_name,
+      quiz_session_id: row.quiz_session_id,
+      round,
+      question_number: questionNumber,
+      event_type: eventType,
+      timestamp,
+      duration_seconds: durationSeconds
+    };
+  }
   function scheduleStaleRefresh(row) {
     const existing = staleTimers.get(row.quiz_session_id);
     if (existing) clearTimeout(existing);
     staleTimers.delete(row.quiz_session_id);
-    if (row.current_state !== "ACTIVE") return;
+    if (row.current_state === "COMPLETED") return;
     const staleAt = new Date(row.last_activity).getTime() + STALE_AFTER_MS + 1;
     const timer = setTimeout(() => {
       staleTimers.delete(row.quiz_session_id);
       const latest = statements.getSession.get(row.quiz_session_id);
-      if (!latest || latest.current_state !== "ACTIVE") return;
-      if (monitorStatus(latest) === "STALE") publish();
+      if (!latest || latest.current_state === "COMPLETED") return;
+      if (monitorStatus(latest) === "STALE") publishParticipant(latest);
       else scheduleStaleRefresh(latest);
     }, Math.max(0, staleAt - Date.now()));
     timer.unref();
@@ -357,14 +411,17 @@ function createApp(options = {}) {
     }
   }
   function appendEvent(row, type, context, timestamp, durationSeconds = null, clientEventId = null) {
-    statements.insertEvent.run(
+    return statements.insertEvent.run(
       row.participant_id, row.participant_name, row.quiz_session_id,
       context.round, context.questionNumber, type, timestamp, durationSeconds, clientEventId
-    );
+    ).lastInsertRowid;
   }
 
   app.get("/api/admin/session", (req, res) => {
     res.json({ authenticated: req.session.role === "admin" });
+  });
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", backendInstanceId });
   });
   app.post("/api/admin/login", requireSameOriginJson, (req, res) => {
     if (!isText(req.body.adminId, 120) || typeof req.body.password !== "string" ||
@@ -397,7 +454,7 @@ function createApp(options = {}) {
     });
     res.flushHeaders();
     adminStreams.set(res, req.sessionID);
-    res.write(`retry: 2000\n\nevent: monitor\ndata: ${JSON.stringify(snapshot())}\n\n`);
+    res.write(`retry: 2000\n\nevent: monitor\ndata: ${JSON.stringify({ type: "snapshot", ...snapshot() })}\n\n`);
     const keepAlive = setInterval(() => {
       if (!res.write(": keep-alive\n\n")) res.end();
     }, 20000);
@@ -411,7 +468,8 @@ function createApp(options = {}) {
     if (req.session.role === "admin") return res.status(403).json({ error: "Admin sessions cannot start participant monitoring." });
     if (!["fullName", "college", "email", "department", "year"].every(key => isText(req.body.participant?.[key], key === "email" ? 254 : 160)) ||
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(req.body.participant.email) ||
-        !/^PG-\d{4}-\d{4,}$/.test(req.body.participantId || "") ||
+        (req.body.participant.phone != null && req.body.participant.phone !== "" &&
+          !isText(req.body.participant.phone, 40)) ||
         !Number.isInteger(req.body.round) || req.body.round < 1 || req.body.round > 3) {
       return res.status(400).json({ error: "Participant quiz session details are invalid." });
     }
@@ -422,45 +480,66 @@ function createApp(options = {}) {
     }
     req.session.role = "participant";
     const timestamp = serverTimestamp();
-    const requestedSessionId = req.body.quizSessionId;
-    if (requestedSessionId != null &&
-        (typeof requestedSessionId !== "string" ||
-         !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(requestedSessionId))) {
-      return res.status(400).json({ error: "Participant quiz session ID is invalid." });
+    const startRequestId = req.body.startRequestId || req.body.quizSessionId;
+    if (!isText(startRequestId, 80) ||
+        !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(startRequestId)) {
+      return res.status(400).json({ error: "Participant session request ID is invalid." });
     }
-    const quizSessionId = requestedSessionId || crypto.randomUUID();
-    const existingSession = statements.getSession.get(quizSessionId);
+    const existingSession = statements.findStartRequest.get(startRequestId);
     if (existingSession) {
-      if (existingSession.owner_sid !== req.sessionID || existingSession.current_state === "COMPLETED") {
+      const participant = req.body.participant;
+      const sameParticipant = existingSession.participant_name === participant.fullName.trim() &&
+        existingSession.college === participant.college.trim() &&
+        existingSession.email === participant.email.trim() &&
+        existingSession.department === participant.department.trim() &&
+        existingSession.year === participant.year.trim();
+      if (!sameParticipant || existingSession.current_state === "COMPLETED") {
         return res.status(409).json({ error: "Participant quiz session cannot be started again." });
       }
+      statements.updateOwner.run(req.sessionID, existingSession.quiz_session_id);
       return saveSession(req, res, () => {
-        res.json({ quizSessionId, timestamp: existingSession.created_at, resumed: true });
+        const resumedSession = statements.getSession.get(existingSession.quiz_session_id);
+        scheduleStaleRefresh(resumedSession);
+        publishParticipant(resumedSession);
+        res.json({
+          quizSessionId: existingSession.quiz_session_id,
+          participantId: existingSession.participant_id,
+          timestamp: existingSession.created_at,
+          resumed: true
+        });
       });
     }
+    const quizSessionId = crypto.randomUUID();
+    const participantId = `PG-${new Date().getFullYear()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
     try {
       const transaction = db.transaction(() => {
         statements.insertSession.run({
           quizSessionId,
-          participantId: req.body.participantId,
+          participantId,
+          clientStartId: startRequestId,
           participantName: req.body.participant.fullName.trim(),
           college: req.body.participant.college.trim(),
           email: req.body.participant.email.trim(),
+          phone: req.body.participant.phone ? req.body.participant.phone.trim() : "",
           department: req.body.participant.department.trim(),
           year: req.body.participant.year.trim(),
+          deviceType: deviceType(req.get("user-agent")),
           ownerSid: req.sessionID,
           round: question.round,
           questionNumber: question.questionNumber,
           timestamp,
           eventType: "SESSION_STARTED"
         });
-        appendEvent(statements.getSession.get(quizSessionId), "SESSION_STARTED", question, timestamp);
+        const row = statements.getSession.get(quizSessionId);
+        const eventId = appendEvent(row, "SESSION_STARTED", question, timestamp);
+        return { row, eventId };
       });
-      transaction();
+      const { row, eventId } = transaction();
       saveSession(req, res, () => {
-        scheduleStaleRefresh(statements.getSession.get(quizSessionId));
-        publish();
-        res.status(201).json({ quizSessionId, timestamp });
+        scheduleStaleRefresh(row);
+        publishParticipant(row, monitorEvent(row, "SESSION_STARTED", timestamp,
+          question.round, question.questionNumber, null, eventId));
+        res.status(201).json({ quizSessionId, participantId, timestamp });
       });
     } catch (error) {
       next(error);
@@ -487,18 +566,20 @@ function createApp(options = {}) {
       returns: row.returns + (resumed ? 1 : 0)
     };
     const eventType = resumed ? "RETURNED" : "PAGE_RESUMED";
-    const transaction = db.transaction(() => {
+    const insertEvent = db.transaction(() => {
       statements.updateSession.run({
         quizSessionId: row.quiz_session_id, round: question.round, questionNumber: question.questionNumber,
         state: "ACTIVE", timestamp, eventType, inactiveSince: null,
         tabSwitches: row.tab_switches, focusLosses: row.focus_losses,
         fullscreenExits: row.fullscreen_exits, returns: nextState.returns
       });
-      appendEvent(nextState, eventType, question, timestamp, durationSeconds);
+      return appendEvent(nextState, eventType, question, timestamp, durationSeconds);
     });
-    transaction();
-    scheduleStaleRefresh(statements.getSession.get(row.quiz_session_id));
-    publish();
+    const eventId = insertEvent();
+    const resumedRow = statements.getSession.get(row.quiz_session_id);
+    scheduleStaleRefresh(resumedRow);
+    publishParticipant(resumedRow,
+      monitorEvent(resumedRow, eventType, timestamp, question.round, question.questionNumber, durationSeconds, eventId));
     res.json({ quizSessionId: row.quiz_session_id, timestamp });
   });
   app.post("/api/monitor/events", requireSameOriginJson, requireParticipant, (req, res, next) => {
@@ -579,24 +660,29 @@ function createApp(options = {}) {
       returns
     };
     try {
-      const transaction = db.transaction(() => {
+      const insertEvent = db.transaction(() => {
         statements.updateSession.run({
           quizSessionId, round: question.round, questionNumber: question.questionNumber,
           state, timestamp, eventType, inactiveSince: nextInactiveSince,
           tabSwitches: tabs, focusLosses, fullscreenExits, returns
         });
         if (eventType !== "QUIZ_PROGRESS") {
-          appendEvent(updated, eventType, question, timestamp, durationSeconds, clientEventId);
+          return appendEvent(updated, eventType, question, timestamp, durationSeconds, clientEventId);
         }
+        return null;
       });
-      transaction();
-      scheduleStaleRefresh(statements.getSession.get(quizSessionId));
+      const progressEvent = eventId => eventId == null ? null :
+        monitorEvent(statements.getSession.get(quizSessionId), eventType, timestamp,
+          question.round, question.questionNumber, durationSeconds, eventId);
+      const insertedEventId = insertEvent();
+      const savedRow = statements.getSession.get(quizSessionId);
+      scheduleStaleRefresh(savedRow);
       const progressChanged = eventType !== "QUIZ_PROGRESS" ||
         question.round !== row.current_round ||
         question.questionNumber !== row.current_question ||
         row.current_state !== state ||
         monitorStatus(row) === "STALE";
-      if (progressChanged) publish();
+      if (progressChanged) publishParticipant(savedRow, progressEvent(insertedEventId));
       res.status(201).json({ timestamp, recorded: true });
     } catch (error) {
       next(error);

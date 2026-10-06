@@ -45,13 +45,18 @@ do not expose an unencrypted deployment to an untrusted network.
 The static `python -m http.server` workflow is not suitable for quiz monitoring:
 it has no authenticated API or server-side database.
 Run the API and security tests with `npm test` after dependencies are installed.
-The admin monitor uses one authenticated Server-Sent Events connection; it sends
-an initial snapshot, publishes database changes, and relies on browser-managed
-reconnection. Participant monitoring retries transient network failures with
-backoff and deduplicates retried session/event writes. Routine progress
-heartbeats update participant presence without creating audit-event rows or
-broadcasting unchanged snapshots. The service worker checks the network for
-current app code and falls back to its cache when offline.
+The admin monitor uses one authenticated Server-Sent Events connection; its
+initial snapshot and reconnect snapshots are read from the centralized database,
+and later database changes are sent as participant-specific updates. The browser
+reconnects the stream automatically. Participant monitoring retries transient
+network failures with backoff and deduplicates retried session/event writes.
+The participant quiz displays a warning if its monitoring session cannot reach
+the backend. Routine progress heartbeats update participant presence without
+creating audit-event rows or broadcasting unchanged snapshots. Quiz answers and
+completed-attempt reports remain in the participant browser's localStorage; the
+central live monitor stores and synchronizes active quiz-session details. The
+service worker checks the network for current app code and falls back to its
+cache when offline.
 
 ### Deploying on Render
 
@@ -69,10 +74,14 @@ Set these private environment variables in the Web Service:
 
 The service uses Node.js 22 LTS, binds to `0.0.0.0` in production, and trusts
 Render's single HTTPS proxy hop so same-origin login checks and secure session
-cookies work behind TLS termination. A Render persistent disk mounted at
-`/opt/render/project/src/data` is required if SQLite quiz-monitoring records
-and server sessions must survive service restarts and deploys. After
-deployment, open the **Web Service** URL, not the old Static Site URL.
+cookies work behind TLS termination. `render.yaml` mounts a persistent disk at
+`/opt/render/project/src/data`; this is required because SQLite and the SSE
+publisher are local to the API process. Render disks pin the service to one
+instance so every device writes to the same database and reaches the same live
+event publisher. The disk requires a Render plan that supports persistent
+disks. Use the exact **Web Service** HTTPS URL on every PC, laptop, and mobile
+device; `localhost` always refers to the device itself. Do not use the old
+Static Site URL or a separately hosted copy of the frontend.
 
 The opening screen plays an original, lightweight canvas web-swing sequence
 behind a rotating cybersecurity calibration HUD. Its responsive city framing,

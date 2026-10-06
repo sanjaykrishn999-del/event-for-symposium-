@@ -7,7 +7,8 @@
   let answerLocked = false;
   let stopMonitoringStream = null;
   let monitoringGeneration = 0;
-  let lastMonitoringView = "";
+  let monitoringParticipants = new Map();
+  let monitoringEvents = [];
 
   function esc(value) {
     return String(value == null ? "" : value).replace(/[&<>"]/g, char =>
@@ -20,6 +21,13 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
   }
+  PGMonitoringService.setStatusHandler(error => {
+    const status = $("#monitoringSyncStatus");
+    status.hidden = !error;
+    status.textContent = error
+      ? `Live sync is unavailable; the admin may not see this participant yet. Open the symposium Web Service URL and check the connection. ${error.message}`
+      : "";
+  });
   function activeAttemptId() {
     try { return sessionStorage.getItem(ACTIVE_KEY); }
     catch (error) { return null; }
@@ -281,41 +289,40 @@
       return "QUESTION PROGRESS";
   }
 
-  function renderLiveMonitor(data) {
-      const nextView = JSON.stringify({ participants: data.participants, events: data.events });
-      if (nextView === lastMonitoringView) return;
-      lastMonitoringView = nextView;
-      const participants = $("#liveParticipants");
-      const feed = $("#monitorFeed");
-      participants.innerHTML = data.participants.length ? data.participants.map(person => {
-        const status = person.currentStatus;
-        const attention = ["ATTENTION", "AWAY", "STALE"].includes(status);
-        const statusText = status === "AWAY" ? "AWAY" : status === "STALE" ? "NO RECENT SIGNAL" :
-          attention ? "ATTENTION" : "ACTIVE";
-        const roundName = person.round === 3 ? "Final Round" : `Round ${person.round}`;
-        const total = PGQuizService.roundSize(person.round);
-        const lastEvent = person.lastEvent ? activityLabel({ event_type: person.lastEvent }) : "—";
-        return `<article class="monitor-participant ${attention ? "needs-attention" : ""}">
-          <div class="monitor-card-heading">
-            <span class="monitor-status ${attention ? "attention" : "active"}">${attention ? "🟠" : "🟢"} ${statusText}</span>
-            <span class="qmeta">${esc(person.participantId)}</span>
-          </div>
-          <h4>${esc(person.participantName)}</h4>
-          <p class="monitor-identity">${esc(person.college)} · ${esc(person.department)} · ${esc(person.year)}</p>
-          <p class="monitor-identity"><a href="mailto:${encodeURIComponent(person.email)}">${esc(person.email)}</a></p>
-          <p class="monitor-position">${esc(roundName)} — Question ${person.questionNumber}/${total}</p>
-          <p class="monitor-last">Quiz status: ${esc(person.quizStatus)}</p>
-          <div class="monitor-counts">
-            <span>Tab switches <b>${person.tabSwitches}</b></span>
-            <span>Focus losses <b>${person.focusLosses}</b></span>
-            <span>Fullscreen exits <b>${person.fullscreenExits}</b></span>
-            <span>Returns <b>${person.returns}</b></span>
-          </div>
-          <p class="monitor-last">Last activity: ${esc(new Date(person.lastActivity).toLocaleTimeString())}</p>
-          <p class="monitor-last">Last event: ${esc(lastEvent)}</p>
-        </article>`;
-      }).join("") : `<p class="empty">No active participants.</p>`;
-      feed.innerHTML = data.events.length ? data.events.slice(0, 30).map(event => {
+  function participantCardMarkup(person) {
+      const status = person.currentStatus;
+      const online = status !== "STALE";
+      const attention = ["ATTENTION", "AWAY", "STALE"].includes(status);
+      const statusText = online ? "ONLINE" : "OFFLINE";
+      const roundName = person.round === 3 ? "Final Round" : `Round ${person.round}`;
+      const total = PGQuizService.roundSize(person.round);
+      const lastEvent = person.lastEvent ? activityLabel({ event_type: person.lastEvent }) : "—";
+      const loginTime = person.loginTime || person.lastActivity;
+      return `<article class="monitor-participant ${attention ? "needs-attention" : ""}" data-monitor-session="${esc(person.quizSessionId)}">
+        <div class="monitor-card-heading">
+          <span class="monitor-status ${online ? "active" : "attention"}">${online ? "🟢" : "⚪"} ${statusText}</span>
+          <span class="qmeta">${esc(person.participantId)}</span>
+        </div>
+        <h4>${esc(person.participantName)}</h4>
+        <p class="monitor-identity">${esc(person.college)} · ${esc(person.department)} · ${esc(person.year)}</p>
+        <p class="monitor-identity"><a href="mailto:${encodeURIComponent(person.email)}">${esc(person.email)}</a>${person.phone ? ` · ${esc(person.phone)}` : ""}</p>
+        <p class="monitor-identity">Device: ${esc(person.deviceType || "UNKNOWN")}</p>
+        <p class="monitor-position">${esc(roundName)} — Question ${person.questionNumber}/${total}</p>
+        <p class="monitor-last">Quiz status: ${esc(person.quizStatus)}</p>
+        <div class="monitor-counts">
+          <span>Tab switches <b>${person.tabSwitches}</b></span>
+          <span>Focus losses <b>${person.focusLosses}</b></span>
+          <span>Fullscreen exits <b>${person.fullscreenExits}</b></span>
+          <span>Returns <b>${person.returns}</b></span>
+        </div>
+        <p class="monitor-last">Login time: ${esc(new Date(loginTime).toLocaleTimeString())}</p>
+        <p class="monitor-last">Last activity: ${esc(new Date(person.lastActivity).toLocaleTimeString())}</p>
+        <p class="monitor-last">Last event: ${esc(lastEvent)}</p>
+      </article>`;
+  }
+
+  function renderMonitorFeed() {
+      $("#monitorFeed").innerHTML = monitoringEvents.length ? monitoringEvents.slice(0, 30).map(event => {
         const warning = ["TAB_HIDDEN", "WINDOW_BLUR", "FULLSCREEN_EXIT", "PAGE_HIDDEN"].includes(event.event_type);
         return `<li class="${warning ? "monitor-warning" : ""}">
           <span class="monitor-event-type">${warning ? "⚠" : "✓"} ${esc(activityLabel(event))}</span>
@@ -325,11 +332,47 @@
       }).join("") : `<li class="empty">No activity recorded yet.</li>`;
   }
 
+  function renderMonitorParticipant(person) {
+      const container = $("#liveParticipants");
+      const template = document.createElement("template");
+      template.innerHTML = participantCardMarkup(person).trim();
+      const card = template.content.firstElementChild;
+      const previous = monitoringParticipants.get(person.quizSessionId);
+      if (previous) previous.replaceWith(card);
+      else container.prepend(card);
+      monitoringParticipants.set(person.quizSessionId, card);
+  }
+
+  function renderLiveMonitor(data) {
+      if (data.type === "snapshot" || Array.isArray(data.participants)) {
+        monitoringParticipants.clear();
+        $("#liveParticipants").replaceChildren();
+        for (const person of data.participants) renderMonitorParticipant(person);
+        monitoringEvents = data.events || [];
+        renderMonitorFeed();
+        return;
+      }
+      if (data.type === "upsert" && data.participant) renderMonitorParticipant(data.participant);
+      if (data.type === "remove") {
+        const participant = monitoringParticipants.get(data.quizSessionId);
+        if (participant) participant.remove();
+        monitoringParticipants.delete(data.quizSessionId);
+      }
+      if (data.event) {
+        monitoringEvents = [data.event, ...monitoringEvents.filter(item => item.event_id !== data.event.event_id)].slice(0, 50);
+        renderMonitorFeed();
+      }
+      if (monitoringParticipants.size === 0) {
+        $("#liveParticipants").innerHTML = `<p class="empty">No active participants.</p>`;
+      }
+  }
+
   function stopLiveMonitoring() {
       monitoringGeneration++;
       if (stopMonitoringStream) stopMonitoringStream();
       stopMonitoringStream = null;
-      lastMonitoringView = "";
+      monitoringParticipants.clear();
+      monitoringEvents = [];
       $("#monitorConnection").textContent = "DISCONNECTED";
       $("#monitorConnection").classList.remove("connected");
   }
@@ -338,6 +381,7 @@
       if (!PGAuthService.isAuthenticated()) return;
       if (stopMonitoringStream) stopMonitoringStream();
       const generation = ++monitoringGeneration;
+      let authCheckInFlight = false;
       $("#monitorConnection").textContent = "CONNECTING";
       stopMonitoringStream = PGMonitoringService.subscribeAdmin(data => {
         if (generation !== monitoringGeneration || !PGAuthService.isAuthenticated()) return;
@@ -350,8 +394,20 @@
         $("#monitorConnection").textContent = "RECONNECTING";
         $("#monitorConnection").classList.remove("connected");
         if (!wasReconnecting) console.error("Admin monitoring stream:", error);
+        if (!authCheckInFlight) {
+          authCheckInFlight = true;
+          PGAuthService.restore().then(authenticated => {
+            if (!authenticated && generation === monitoringGeneration) {
+              stopLiveMonitoring();
+              go("admin-login");
+            }
+          }).catch(authError => {
+            console.error("Admin session verification during stream reconnect:", authError);
+          });
+        }
       }, () => {
         if (generation !== monitoringGeneration) return;
+        authCheckInFlight = false;
         $("#monitorConnection").textContent = "LIVE";
         $("#monitorConnection").classList.add("connected");
       });

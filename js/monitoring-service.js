@@ -1,6 +1,7 @@
 /* Same-origin monitoring API; event timestamps and records are server-owned. */
 (function () {
   const SESSION_KEY = "phishguard.monitor.session.v1";
+  const START_REQUEST_KEY = "phishguard.monitor.start-request.v1";
   const API = "/api/monitor";
   const REQUEST_TIMEOUT_MS = 10000;
   const MAX_RETRY_MS = 30000;
@@ -22,6 +23,7 @@
   let startPromise = null;
   let eventFlushPromise = null;
   let listenersAttached = false;
+  let statusHandler = null;
   const pendingEvents = [];
 
   function newId() {
@@ -80,6 +82,7 @@
 
   function reportError(error) {
     console.error("Quiz monitoring could not be synchronized:", error);
+    if (statusHandler) statusHandler(error);
   }
 
   function context(eventType, clientEventId) {
@@ -120,6 +123,7 @@
         try {
           await post(`${API}/events`, item.payload, item.keepalive);
           pendingEvents.shift();
+          if (statusHandler) statusHandler(null);
           if (item.resolve) item.resolve(true);
           eventRetryCount = 0;
         } catch (error) {
@@ -194,30 +198,38 @@
         await resumeIfPresent();
         return;
       } catch (error) {
-        if (error.status !== 404) {
-          if (![401, 409].includes(error.status)) throw error;
+        if (![401, 404, 409].includes(error.status) && !error.retryable) throw error;
+        sessionId = "";
+        sessionStorage.removeItem(SESSION_KEY);
+        if (error.status === 409) {
+          sessionStorage.removeItem(START_REQUEST_KEY);
+        }
+        if (error.retryable) throw error;
+        if (error.status === 401) {
           sessionStorage.removeItem(SESSION_KEY);
-          sessionId = "";
         }
       }
     }
-    if (!sessionId) {
-      sessionId = newId();
-      sessionStorage.setItem(SESSION_KEY, sessionId);
+    let startRequestId = sessionStorage.getItem(START_REQUEST_KEY) || "";
+    if (!startRequestId) {
+      startRequestId = newId();
+      sessionStorage.setItem(START_REQUEST_KEY, startRequestId);
     }
-    await post(`${API}/sessions`, {
-      quizSessionId: sessionId,
-      participantId: attempt.id,
+    const result = await post(`${API}/sessions`, {
+      startRequestId,
       participant: {
         fullName: attempt.participant.fullName,
         college: attempt.participant.college,
         email: attempt.participant.email,
+        phone: attempt.participant.phone || "",
         department: attempt.participant.department,
         year: attempt.participant.year
       },
       round,
       questionNumber
     });
+    sessionId = result.quizSessionId;
+    sessionStorage.setItem(SESSION_KEY, sessionId);
   }
 
   function start(attempt) {
@@ -231,6 +243,7 @@
     }
     startPromise = establishSession(attempt).then(() => {
       startRetryCount = 0;
+      if (statusHandler) statusHandler(null);
       activate();
     }).catch(error => {
       reportError(error);
@@ -319,6 +332,7 @@
     if (eventRetry) window.clearTimeout(eventRetry);
     eventRetry = 0;
     sessionStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(START_REQUEST_KEY);
     sessionId = "";
   }
 
@@ -343,5 +357,11 @@
     return () => stream.close();
   }
 
-  window.PGMonitoringService = Object.freeze({ start, updateProgress, finish, adminSnapshot, subscribeAdmin });
+  function setStatusHandler(handler) {
+    statusHandler = typeof handler === "function" ? handler : null;
+  }
+
+  window.PGMonitoringService = Object.freeze({
+    start, updateProgress, finish, adminSnapshot, subscribeAdmin, setStatusHandler
+  });
 })();
