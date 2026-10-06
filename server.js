@@ -230,7 +230,10 @@ function createApp(options = {}) {
   };
   const adminStreams = new Map();
   app.disable("x-powered-by");
-  app.set("trust proxy", process.env.TRUST_PROXY === "1");
+  app.set("trust proxy", options.trustProxy ??
+    (process.env.NODE_ENV === "production" || process.env.TRUST_PROXY === "1" || process.env.RENDER === "true"
+      ? 1
+      : false));
   app.use((req, res, next) => {
     res.set("X-Content-Type-Options", "nosniff");
     res.set("X-Frame-Options", "DENY");

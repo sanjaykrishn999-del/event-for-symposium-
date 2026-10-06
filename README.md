@@ -60,11 +60,12 @@ Set these private environment variables in the Web Service:
 - `PHISHGUARD_ADMIN_PASSWORD_HASH` (the salted scrypt hash, not the plaintext password)
 - `PHISHGUARD_SESSION_SECRET` (at least 32 random characters)
 
-The service uses Node.js 22 LTS and binds to `0.0.0.0` in production. A Render
-persistent disk mounted at `/opt/render/project/src/data` is required if SQLite
-quiz-monitoring records and server sessions must survive service restarts and
-deploys. After deployment, open the **Web Service** URL, not the old Static
-Site URL.
+The service uses Node.js 22 LTS, binds to `0.0.0.0` in production, and trusts
+Render's single HTTPS proxy hop so same-origin login checks and secure session
+cookies work behind TLS termination. A Render persistent disk mounted at
+`/opt/render/project/src/data` is required if SQLite quiz-monitoring records
+and server sessions must survive service restarts and deploys. After
+deployment, open the **Web Service** URL, not the old Static Site URL.
 
 The opening screen plays an original, lightweight canvas web-swing sequence
 behind a rotating cybersecurity calibration HUD. Its responsive city framing,

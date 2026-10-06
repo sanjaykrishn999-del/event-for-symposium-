@@ -16,6 +16,7 @@ const runtime = createApp({
   adminId: "test-organizer",
   adminPasswordHash: testPasswordHash,
   sessionSecret: "test-session-secret-that-is-long-enough",
+  trustProxy: 1,
   dbPath: path.join(tempDirectory, "monitor.sqlite")
 });
 let server;
@@ -88,6 +89,20 @@ test("monitoring endpoints require an authenticated admin and same-origin reques
     body: "{}"
   });
   assert.equal(wrongOrigin.status, 403);
+});
+
+test("same-origin API requests work behind Render's HTTPS proxy", async () => {
+  const response = await fetch(`${baseUrl}/api/admin/login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: baseUrl.replace(/^http:/, "https:"),
+      "X-Forwarded-Proto": "https"
+    },
+    body: JSON.stringify({ adminId: "invalid", password: "invalid" })
+  });
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get("content-type")?.includes("application/json"), true);
 });
 
 test("logout ends only the current session and the same admin can sign in again", async () => {
