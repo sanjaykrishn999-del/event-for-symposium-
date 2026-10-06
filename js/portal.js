@@ -6,6 +6,8 @@
   let attempt = null;
   let answerLocked = false;
   let stopMonitoringStream = null;
+  let monitoringGeneration = 0;
+  let lastMonitoringView = "";
 
   function esc(value) {
     return String(value == null ? "" : value).replace(/[&<>"]/g, char =>
@@ -162,9 +164,8 @@
     }
     try {
       attempt = PGParticipantService.create(details, PGQuizService.selectQuestions());
-      sessionStorage.setItem(ACTIVE_KEY, attempt.id);
       report("#participantError", "");
-      showCurrentQuestion();
+      startAttempt(attempt);
     } catch (error) {
       report("#participantError", "Unable to save your participant details. " + error.message);
     }
@@ -281,6 +282,9 @@
   }
 
   function renderLiveMonitor(data) {
+      const nextView = JSON.stringify({ participants: data.participants, events: data.events });
+      if (nextView === lastMonitoringView) return;
+      lastMonitoringView = nextView;
       const participants = $("#liveParticipants");
       const feed = $("#monitorFeed");
       participants.innerHTML = data.participants.length ? data.participants.map(person => {
@@ -322,8 +326,10 @@
   }
 
   function stopLiveMonitoring() {
+      monitoringGeneration++;
       if (stopMonitoringStream) stopMonitoringStream();
       stopMonitoringStream = null;
+      lastMonitoringView = "";
       $("#monitorConnection").textContent = "DISCONNECTED";
       $("#monitorConnection").classList.remove("connected");
   }
@@ -331,19 +337,23 @@
   function startLiveMonitoring() {
       if (!PGAuthService.isAuthenticated()) return;
       if (stopMonitoringStream) stopMonitoringStream();
+      const generation = ++monitoringGeneration;
       $("#monitorConnection").textContent = "CONNECTING";
-      PGMonitoringService.adminSnapshot().then(renderLiveMonitor).catch(error => {
-        $("#monitorConnection").textContent = "UNAVAILABLE";
-        $("#liveParticipants").innerHTML = `<p class="form-error">Could not load monitoring data: ${esc(error.message)}</p>`;
-      });
       stopMonitoringStream = PGMonitoringService.subscribeAdmin(data => {
+        if (generation !== monitoringGeneration || !PGAuthService.isAuthenticated()) return;
         $("#monitorConnection").textContent = "LIVE";
         $("#monitorConnection").classList.add("connected");
         renderLiveMonitor(data);
       }, error => {
+        if (generation !== monitoringGeneration) return;
+        const wasReconnecting = $("#monitorConnection").textContent === "RECONNECTING";
         $("#monitorConnection").textContent = "RECONNECTING";
         $("#monitorConnection").classList.remove("connected");
-        console.error("Admin monitoring stream:", error);
+        if (!wasReconnecting) console.error("Admin monitoring stream:", error);
+      }, () => {
+        if (generation !== monitoringGeneration) return;
+        $("#monitorConnection").textContent = "LIVE";
+        $("#monitorConnection").classList.add("connected");
       });
   }
 
@@ -481,7 +491,8 @@
     }
   });
 
-  window.addEventListener("pageshow", async () => {
+  window.addEventListener("pageshow", async event => {
+    if (!event.persisted) return;
     try {
       await PGAuthService.restore();
       if (!PGAuthService.isAuthenticated() && $("#view-admin").classList.contains("active")) go("admin-login");

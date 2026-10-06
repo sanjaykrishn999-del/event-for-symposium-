@@ -1,6 +1,6 @@
 /* PhishGuard offline cache. Only active when the site is served over http(s);
    opening index.html directly from the file system already works offline. */
-const CACHE = 'phishguard-v16';
+const CACHE = 'phishguard-v17';
 const ASSETS = [
   './', './index.html', './css/styles.css',
   './js/data.js', './js/data-service.js',
@@ -23,11 +23,26 @@ self.addEventListener('fetch', e => {
     e.respondWith(fetch(e.request));
     return;
   }
-  e.respondWith(
-    caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
-      const copy = res.clone();
-      caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
+  const url = new URL(e.request.url);
+  const appAsset = e.request.mode === 'navigate' ||
+    /\.(?:html|js|css|webmanifest)$/i.test(url.pathname);
+  if (appAsset) {
+    e.respondWith(fetch(e.request).then(res => {
+      if (res.ok && url.origin === self.location.origin) {
+        const copy = res.clone();
+        e.waitUntil(caches.open(CACHE).then(cache => cache.put(e.request, copy)));
+      }
       return res;
-    }).catch(() => caches.match('./index.html')))
-  );
+    }).catch(() => caches.match(e.request).then(hit =>
+      hit || (e.request.mode === 'navigate' ? caches.match('./index.html') : Response.error())
+    )));
+    return;
+  }
+  e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+    if (res.ok && url.origin === self.location.origin) {
+      const copy = res.clone();
+      e.waitUntil(caches.open(CACHE).then(cache => cache.put(e.request, copy)));
+    }
+    return res;
+  })));
 });

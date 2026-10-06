@@ -45,6 +45,13 @@ do not expose an unencrypted deployment to an untrusted network.
 The static `python -m http.server` workflow is not suitable for quiz monitoring:
 it has no authenticated API or server-side database.
 Run the API and security tests with `npm test` after dependencies are installed.
+The admin monitor uses one authenticated Server-Sent Events connection; it sends
+an initial snapshot, publishes database changes, and relies on browser-managed
+reconnection. Participant monitoring retries transient network failures with
+backoff and deduplicates retried session/event writes. Routine progress
+heartbeats update participant presence without creating audit-event rows or
+broadcasting unchanged snapshots. The service worker checks the network for
+current app code and falls back to its cache when offline.
 
 ### Deploying on Render
 

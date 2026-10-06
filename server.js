@@ -98,11 +98,18 @@ function createDatabase(dbPath) {
       question_number INTEGER NOT NULL,
       event_type TEXT NOT NULL,
       timestamp TEXT NOT NULL,
-      duration_seconds INTEGER
+      duration_seconds INTEGER,
+      client_event_id TEXT
     );
     CREATE INDEX IF NOT EXISTS monitor_events_recent
       ON quiz_monitor_events(timestamp DESC);
   `);
+  const eventColumns = db.pragma("table_info(quiz_monitor_events)");
+  if (!eventColumns.some(column => column.name === "client_event_id")) {
+    db.exec("ALTER TABLE quiz_monitor_events ADD COLUMN client_event_id TEXT");
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS monitor_events_client_id
+    ON quiz_monitor_events(client_event_id) WHERE client_event_id IS NOT NULL`);
   return db;
 }
 
@@ -213,8 +220,11 @@ function createApp(options = {}) {
     insertEvent: db.prepare(`
       INSERT INTO quiz_monitor_events (
         participant_id, participant_name, quiz_session_id, round, question_number,
-        event_type, timestamp, duration_seconds
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        event_type, timestamp, duration_seconds, client_event_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    findClientEvent: db.prepare(`
+      SELECT timestamp FROM quiz_monitor_events WHERE client_event_id = ?
     `),
     activeSessions: db.prepare(`
       SELECT * FROM quiz_monitor_sessions
@@ -229,6 +239,7 @@ function createApp(options = {}) {
     `)
   };
   const adminStreams = new Map();
+  const staleTimers = new Map();
   app.disable("x-powered-by");
   app.set("trust proxy", options.trustProxy ??
     (process.env.NODE_ENV === "production" || process.env.TRUST_PROXY === "1" || process.env.RENDER === "true"
@@ -313,18 +324,42 @@ function createApp(options = {}) {
     };
   }
   function publish() {
+    if (adminStreams.size === 0) return;
     const payload = `event: monitor\ndata: ${JSON.stringify(snapshot())}\n\n`;
-    for (const response of adminStreams.keys()) response.write(payload);
+    for (const response of adminStreams.keys()) {
+      if (!response.write(payload)) {
+        response.end();
+        adminStreams.delete(response);
+      }
+    }
   }
+  function scheduleStaleRefresh(row) {
+    const existing = staleTimers.get(row.quiz_session_id);
+    if (existing) clearTimeout(existing);
+    staleTimers.delete(row.quiz_session_id);
+    if (row.current_state !== "ACTIVE") return;
+    const staleAt = new Date(row.last_activity).getTime() + STALE_AFTER_MS + 1;
+    const timer = setTimeout(() => {
+      staleTimers.delete(row.quiz_session_id);
+      const latest = statements.getSession.get(row.quiz_session_id);
+      if (!latest || latest.current_state !== "ACTIVE") return;
+      if (monitorStatus(latest) === "STALE") publish();
+      else scheduleStaleRefresh(latest);
+    }, Math.max(0, staleAt - Date.now()));
+    timer.unref();
+    staleTimers.set(row.quiz_session_id, timer);
+  }
+  statements.activeSessions.all(new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString())
+    .forEach(scheduleStaleRefresh);
   function closeAdminStreams(sessionId) {
     for (const [response, streamSessionId] of adminStreams) {
       if (streamSessionId === sessionId) response.end();
     }
   }
-  function appendEvent(row, type, context, timestamp, durationSeconds = null) {
+  function appendEvent(row, type, context, timestamp, durationSeconds = null, clientEventId = null) {
     statements.insertEvent.run(
       row.participant_id, row.participant_name, row.quiz_session_id,
-      context.round, context.questionNumber, type, timestamp, durationSeconds
+      context.round, context.questionNumber, type, timestamp, durationSeconds, clientEventId
     );
   }
 
@@ -362,9 +397,11 @@ function createApp(options = {}) {
     });
     res.flushHeaders();
     adminStreams.set(res, req.sessionID);
-    res.write(`event: monitor\ndata: ${JSON.stringify(snapshot())}\n\n`);
-    const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 20000);
-    req.on("close", () => {
+    res.write(`retry: 2000\n\nevent: monitor\ndata: ${JSON.stringify(snapshot())}\n\n`);
+    const keepAlive = setInterval(() => {
+      if (!res.write(": keep-alive\n\n")) res.end();
+    }, 20000);
+    res.on("close", () => {
       clearInterval(keepAlive);
       adminStreams.delete(res);
     });
@@ -385,7 +422,22 @@ function createApp(options = {}) {
     }
     req.session.role = "participant";
     const timestamp = serverTimestamp();
-    const quizSessionId = crypto.randomUUID();
+    const requestedSessionId = req.body.quizSessionId;
+    if (requestedSessionId != null &&
+        (typeof requestedSessionId !== "string" ||
+         !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(requestedSessionId))) {
+      return res.status(400).json({ error: "Participant quiz session ID is invalid." });
+    }
+    const quizSessionId = requestedSessionId || crypto.randomUUID();
+    const existingSession = statements.getSession.get(quizSessionId);
+    if (existingSession) {
+      if (existingSession.owner_sid !== req.sessionID || existingSession.current_state === "COMPLETED") {
+        return res.status(409).json({ error: "Participant quiz session cannot be started again." });
+      }
+      return saveSession(req, res, () => {
+        res.json({ quizSessionId, timestamp: existingSession.created_at, resumed: true });
+      });
+    }
     try {
       const transaction = db.transaction(() => {
         statements.insertSession.run({
@@ -406,6 +458,7 @@ function createApp(options = {}) {
       });
       transaction();
       saveSession(req, res, () => {
+        scheduleStaleRefresh(statements.getSession.get(quizSessionId));
         publish();
         res.status(201).json({ quizSessionId, timestamp });
       });
@@ -444,19 +497,31 @@ function createApp(options = {}) {
       appendEvent(nextState, eventType, question, timestamp, durationSeconds);
     });
     transaction();
+    scheduleStaleRefresh(statements.getSession.get(row.quiz_session_id));
     publish();
     res.json({ quizSessionId: row.quiz_session_id, timestamp });
   });
   app.post("/api/monitor/events", requireSameOriginJson, requireParticipant, (req, res, next) => {
-    const { quizSessionId, eventType } = req.body;
+    const { quizSessionId, eventType, clientEventId } = req.body;
     if (!isText(quizSessionId, 80) || !ALLOWED_EVENTS.has(eventType)) {
       return res.status(400).json({ error: "Monitoring event is invalid." });
+    }
+    if (clientEventId != null &&
+        (typeof clientEventId !== "string" ||
+         !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(clientEventId))) {
+      return res.status(400).json({ error: "Monitoring event ID is invalid." });
     }
     const question = parseRoundQuestion(req.body);
     if (!question) return res.status(400).json({ error: "Round or question number is invalid." });
     const row = statements.findOwnedSession.get(quizSessionId, req.sessionID);
     if (!row || row.current_state === "COMPLETED") {
       return res.status(404).json({ error: "Active quiz monitoring session was not found." });
+    }
+    if (clientEventId) {
+      const existingEvent = statements.findClientEvent.get(clientEventId);
+      if (existingEvent) {
+        return res.status(200).json({ timestamp: existingEvent.timestamp, recorded: false });
+      }
     }
     if (question.round < row.current_round ||
         (question.round === row.current_round && question.questionNumber < row.current_question)) {
@@ -520,10 +585,18 @@ function createApp(options = {}) {
           state, timestamp, eventType, inactiveSince: nextInactiveSince,
           tabSwitches: tabs, focusLosses, fullscreenExits, returns
         });
-        appendEvent(updated, eventType, question, timestamp, durationSeconds);
+        if (eventType !== "QUIZ_PROGRESS") {
+          appendEvent(updated, eventType, question, timestamp, durationSeconds, clientEventId);
+        }
       });
       transaction();
-      publish();
+      scheduleStaleRefresh(statements.getSession.get(quizSessionId));
+      const progressChanged = eventType !== "QUIZ_PROGRESS" ||
+        question.round !== row.current_round ||
+        question.questionNumber !== row.current_question ||
+        row.current_state !== state ||
+        monitorStatus(row) === "STALE";
+      if (progressChanged) publish();
       res.status(201).json({ timestamp, recorded: true });
     } catch (error) {
       next(error);
@@ -557,12 +630,11 @@ function createApp(options = {}) {
     res.status(500).json({ error: "The server could not complete the request." });
   });
 
-  const heartbeat = setInterval(publish, 15000);
-  heartbeat.unref();
   return {
     app,
     close() {
-      clearInterval(heartbeat);
+      for (const timer of staleTimers.values()) clearTimeout(timer);
+      staleTimers.clear();
       for (const response of adminStreams.keys()) response.end();
       adminStreams.clear();
       sessionStore.emit("disconnect");
