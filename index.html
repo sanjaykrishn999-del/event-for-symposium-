@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SYMPOSIUM — Department of Cyber Security</title>
+<meta name="description" content="The Department of Cyber Security symposium: an original cinematic cyber experience and educational PHISHGUARD phishing-awareness quiz.">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#04070c">
+</head>
+<body>
+<div class="backdrop"></div><div class="grid-overlay"></div><div class="motes" id="motes" aria-hidden="true"></div>
+<section class="cinematic-intro" id="cinematicIntro" role="dialog" aria-modal="true" aria-labelledby="cinematicTitle">
+  <canvas id="cinematicCanvas" aria-hidden="true"></canvas>
+  <div class="cinema-vignette" aria-hidden="true"></div>
+  <div class="cinema-scanline" aria-hidden="true"></div>
+  <button class="cinema-skip" id="cinemaSkip" type="button">SKIP INTRO <span aria-hidden="true">↗</span></button>
+  <div class="cinema-content">
+    <div class="cinema-brand" id="cinemaBrand">
+      <div class="cinema-emblem" aria-hidden="true">
+        <svg viewBox="0 0 64 64">
+          <path d="M32 5 53 13v16c0 14-9 24-21 30C20 53 11 43 11 29V13L32 5Z"/>
+          <path d="M32 14v34M18 23l28 18M46 23 18 41M19 19l26 26M45 19 19 45"/>
+          <circle cx="32" cy="14" r="2"/><circle cx="18" cy="23" r="2"/><circle cx="46" cy="23" r="2"/>
+          <circle cx="18" cy="41" r="2"/><circle cx="46" cy="41" r="2"/><circle cx="32" cy="48" r="2"/>
+        </svg>
+      </div>
+      <p class="cinema-kicker">DEPARTMENT OF CYBER SECURITY PRESENTS</p>
+      <h1 id="cinematicTitle"><span>SYMPOSIUM</span></h1>
+      <p class="cinema-department">DEPARTMENT OF CYBER SECURITY</p>
+      <p class="cinema-tagline">CONNECT <i></i> SECURE <i></i> DEFEND</p>
+    </div>
+    <div class="cinema-entry" id="cinemaEntry" aria-hidden="true">
+      <p class="cinema-entry-label">SECURE ACCESS <span>·</span> 2026</p>
+      <div class="cinema-options">
+        <article class="cinema-option cinema-participant">
+          <span class="cinema-option-icon" aria-hidden="true">
+            <svg viewBox="0 0 32 32"><circle cx="16" cy="10" r="5"/><path d="M6 27c0-6 4-10 10-10s10 4 10 10"/></svg>
+          </span>
+          <div><p>PARTICIPANT</p><h2>Ready to test your instincts?</h2></div>
+          <button class="cinema-action" type="button" data-go="participant-details">ENTER SYMPOSIUM <span aria-hidden="true">→</span></button>
+        </article>
+        <article class="cinema-option cinema-admin">
+          <span class="cinema-option-icon" aria-hidden="true">
+            <svg viewBox="0 0 32 32"><rect x="6" y="14" width="20" height="14" rx="3"/><path d="M10 14V9a6 6 0 0 1 12 0v5m-6 6v3"/></svg>
+          </span>
+          <div><p>ADMIN</p><h2>Organizer access</h2></div>
+          <button class="cinema-action" type="button" data-go="admin-login">ADMIN LOGIN <span aria-hidden="true">→</span></button>
+        </article>
+      </div>
+      <button class="cinema-explore" type="button" data-go="home">EXPLORE PHISHGUARD LEARNING <span aria-hidden="true">↗</span></button>
+    </div>
+  </div>
+  <div class="cinema-coordinate" aria-hidden="true">PG // SECURE NETWORK INITIALIZED</div>
+</section>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <div class="wrap">
+    <button class="brand" data-go="home" aria-label="PhishGuard home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8 3v6.2c0 5-3.4 9.3-8 10.8-4.6-1.5-8-5.8-8-10.8V5l8-3z" fill="none" stroke="#31e39a" stroke-width="1.6"/><path d="M8.6 12.1l2.3 2.3 4.5-4.6" fill="none" stroke="#38d2ff" stroke-width="1.8" stroke-linecap="round"/></svg>
+      PHISH<b>GUARD</b>
+    </button>
+    <button class="menu-btn" id="menuBtn" aria-expanded="false" aria-controls="mainnav">Menu</button>
+    <nav class="main" id="mainnav" aria-label="Main">
+      <button data-go="home">Home</button>
+      <button data-go="participant-details">Enter quiz</button>
+      <button data-go="hunt-pick">Red Flag Hunt</button>
+      <button data-go="compare-pick">Site Compare</button>
+      <button data-go="learn">Learn</button>
+      <button data-go="flags">Red Flags</button>
+      <button data-go="board">Leaderboard</button>
+      <button data-go="about">About</button>
+      <button data-go="admin-login">Admin login</button>
+    </nav>
+    <button class="btn btn-primary cta-sm" data-go="participant-details">Enter quiz</button>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ================= HOME ================= -->
+<section class="view active" id="view-home">
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <span class="tagline">🛡️ Think before you click.</span>
+        <h1>PHISHGUARD</h1>
+        <p class="sub">Can you spot the phish?</p>
+        <p class="lede">Test your cybersecurity awareness. Examine realistic digital messages, identify suspicious clues, and learn how to protect yourself from phishing attacks.</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary" data-go="participant-details">ENTER QUIZ</button>
+          <button class="btn" data-go="admin-login">ADMIN LOGIN</button>
+          <button class="btn" data-scroll="how">How it works</button>
+          <button class="btn btn-ghost" data-go="learn">Learn phishing</button>
+        </div>
+        <div class="opt-row">
+          <button class="btn btn-sm" id="symposiumBtn">🎓 3-round symposium quiz</button>
+          <button class="btn btn-sm btn-ghost" data-go="hunt-pick">🔎 Find the red flags</button>
+        </div>
+      </div>
+      <div class="art" aria-hidden="true">
+        <svg viewBox="0 0 320 300">
+          <defs>
+            <linearGradient id="gShield" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#31e39a"/><stop offset="1" stop-color="#38d2ff"/>
+            </linearGradient>
+          </defs>
+          <circle cx="160" cy="150" r="118" fill="none" stroke="rgba(140,180,220,.18)" stroke-width="1" class="a-line"/>
+          <circle cx="160" cy="150" r="88" fill="none" stroke="rgba(140,180,220,.12)" stroke-width="1"/>
+          <g class="a-shield">
+            <path d="M160 68l58 22v45c0 36-24 67-58 78-34-11-58-42-58-78V90l58-22z" fill="rgba(49,227,154,.09)" stroke="url(#gShield)" stroke-width="2.4"/>
+            <path d="M138 152l16 16 32-34" fill="none" stroke="#31e39a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          </g>
+          <g class="a-mail">
+            <rect x="24" y="106" width="72" height="50" rx="8" fill="#0e131c" stroke="#38d2ff" stroke-width="2"/>
+            <path d="M28 113l32 22 32-22" fill="none" stroke="#38d2ff" stroke-width="2"/>
+          </g>
+          <g class="a-lock">
+            <rect x="228" y="186" width="54" height="44" rx="9" fill="#0e131c" stroke="#9d7bff" stroke-width="2"/>
+            <path d="M241 186v-11a14 14 0 0128 0v11" fill="none" stroke="#9d7bff" stroke-width="2"/>
+            <circle cx="255" cy="206" r="5" fill="#9d7bff"/>
+          </g>
+          <g class="a-warn">
+            <path d="M52 232l24-42 24 42z" fill="rgba(255,77,100,.12)" stroke="#ff4d64" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M76 205v12" stroke="#ff4d64" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="76" cy="224" r="1.9" fill="#ff4d64"/>
+          </g>
+          <g class="a-hook">
+            <path d="M232 20v52a26 26 0 01-52 0" fill="none" stroke="#ffc04d" stroke-width="3" stroke-linecap="round"/>
+            <path d="M172 62l8 12 8-12" fill="none" stroke="#ffc04d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="232" cy="18" r="4" fill="#ffc04d"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <hr class="sep">
+
+    <div class="reveal">
+      <p class="eyebrow">THE DAILY THREAT</p>
+      <h2>Can you detect what others miss?</h2>
+      <p class="lede">Attackers rarely break in. They ask politely, in a message that looks like every other message in your inbox.</p>
+      <div class="grid g3" style="margin-top:22px">
+        <div class="stat"><div class="ico">📧</div><b>Email phishing</b><span>Fake alerts, invoices and password resets that borrow a real brand's tone and push you toward a login page that isn't theirs.</span></div>
+        <div class="stat"><div class="ico">📱</div><b>Smishing</b><span>Short text messages with a shortened link, a deadline and just enough detail to feel personal.</span></div>
+        <div class="stat"><div class="ico">🌐</div><b>Fake websites</b><span>Pixel-accurate login pages living on a lookalike domain, often with a valid padlock that proves nothing about who owns it.</span></div>
+      </div>
+    </div>
+
+    <hr class="sep">
+
+    <div id="how" class="reveal">
+      <p class="eyebrow">HOW IT WORKS</p>
+      <h2>Examine. Decide. Learn.</h2>
+      <div class="grid g3" style="margin-top:28px">
+        <div class="step"><div class="n">1</div><h3>Examine</h3><p class="lede" style="font-size:.95rem">Look carefully at the sender, links, message content, attachments and other details.</p></div>
+        <div class="step"><div class="n">2</div><h3>Decide</h3><p class="lede" style="font-size:.95rem">Choose whether the scenario is legitimate or phishing. Your answer is recorded without revealing correctness.</p></div>
+        <div class="step"><div class="n">3</div><h3>Learn</h3><p class="lede" style="font-size:.95rem">Explore the Red Flag Hunt and learning sections to build safer habits beyond the quiz.</p></div>
+      </div>
+      <div class="hero-actions"><button class="btn btn-primary" data-go="participant-details">ENTER QUIZ</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CATEGORIES ================= -->
+<section class="view" id="view-categories">
+  <div class="wrap">
+    <p class="eyebrow">STEP 1 OF 2</p>
+    <h2>Choose what you want to inspect</h2>
+    <p class="lede">Every scenario below is fictional and built for training. Nothing here collects passwords, payment details or personal data.</p>
+    <div class="grid g3" id="catGrid" style="margin-top:26px"></div>
+  </div>
+</section>
+
+<!-- ================= DIFFICULTY ================= -->
+<section class="view" id="view-difficulty">
+  <div class="wrap">
+    <p class="eyebrow">STEP 2 OF 2</p>
+    <h2 id="diffTitle">Pick your difficulty</h2>
+    <p class="lede">Harder rounds hide the clues in details you have to go looking for.</p>
+    <div class="grid g4" style="margin-top:26px">
+      <button class="pick diff-easy" data-diff="easy"><div class="ico">🟢</div><strong>Easy</strong><p>Obvious clues: strange domains, spelling errors and suspicious requests.</p><span class="go">START →</span></button>
+      <button class="pick diff-med" data-diff="medium"><div class="ico">🟡</div><strong>Medium</strong><p>Realistic messages where the warning signs are quieter.</p><span class="go">START →</span></button>
+      <button class="pick diff-hard" data-diff="hard"><div class="ico">🔴</div><strong>Hard</strong><p>Highly convincing messages. You'll have to inspect several details at once.</p><span class="go">START →</span></button>
+      <button class="pick" data-diff="any"><div class="ico">🎲</div><strong>Random challenge</strong><p>A mixed run pulled from every difficulty level.</p><span class="go">START →</span></button>
+    </div>
+    <div class="opt-row">
+      <label class="toggle"><input type="checkbox" id="optLives"> Play with lives ❤️❤️❤️</label>
+      <label class="toggle"><input type="checkbox" id="optTimer"> 60-second timer per question</label>
+      <label class="toggle"><input type="checkbox" id="optLong"> Longer round (up to 15 questions)</label>
+      <button class="btn btn-sm btn-ghost" data-go="participant-details">← Return to quiz entry</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= QUIZ ================= -->
+<section class="view" id="view-quiz">
+  <div class="wrap">
+    <button class="btn btn-sm sympo-exit" id="sympoExit" hidden>Exit symposium mode</button>
+    <div class="quizbar">
+      <div class="qmeta">Question <b id="qNow">1</b> of <b id="qTotal">10</b></div>
+      <div class="bar"><i id="qBar"></i></div>
+      <div class="qmeta">Score: <b id="qScore">0</b>/<span id="qAnswered">0</span></div>
+      <div class="lives" id="qLives" hidden aria-label="Lives remaining"></div>
+      <div class="timer" id="qTimer" hidden>60s</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <span class="chip" id="qCat">EMAIL</span><span class="chip" id="qDiff">EASY</span>
+    </div>
+    <div id="stage"></div>
+    <div class="answer-zone">
+      <p class="ask">What do you think?</p>
+      <div class="verdicts">
+        <button class="verdict v-legit" id="btnLegit">🟢 LEGITIMATE<small>Safe to act on</small></button>
+        <button class="verdict v-phish" id="btnPhish">🔴 PHISHING<small>Don't click. Don't reply.</small></button>
+      </div>
+      <div id="feedback" aria-live="polite"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= RED FLAG HUNT PICKER ================= -->
+<section class="view" id="view-hunt-pick">
+  <div class="wrap">
+    <p class="eyebrow">GAME MODE</p>
+    <h2>🔎 Find the red flags</h2>
+    <p class="lede">A message is shown in full. Click every part of it that should make you suspicious. Clicking a real clue marks it; clicking something harmless tells you why it's fine.</p>
+    <div class="grid g3" id="huntGrid" style="margin-top:26px"></div>
+  </div>
+</section>
+
+<!-- ================= RED FLAG HUNT ================= -->
+<section class="view" id="view-hunt">
+  <div class="wrap">
+    <div class="hunt-hud">
+      <div><strong id="huntTitle">Find the red flags</strong><div class="qmeta" id="huntSub"></div></div>
+      <div class="qmeta">Found <b id="huntFound">0</b> of <b id="huntTotal">0</b></div>
+      <div class="bar" style="flex:0 1 200px"><i id="huntBar"></i></div>
+      <button class="btn btn-sm" id="huntDone">Finish hunt</button>
+    </div>
+    <div class="hunt-stage" id="huntStage"></div>
+    <div id="huntResult" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- ================= COMPARE PICKER ================= -->
+<section class="view" id="view-compare-pick">
+  <div class="wrap">
+    <p class="eyebrow">GAME MODE</p>
+    <h2>Which website would you trust?</h2>
+    <p class="lede">Two login pages, side by side. Inspect the address bar, the domain spelling, the security indicator, the layout and anything that interrupts you. The login fields are visual mockups only — they don't accept or send anything.</p>
+    <div class="grid g3" id="cmpGrid" style="margin-top:26px"></div>
+  </div>
+</section>
+
+<!-- ================= COMPARE ================= -->
+<section class="view" id="view-compare">
+  <div class="wrap">
+    <p class="eyebrow" id="cmpEyebrow">SCENARIO</p>
+    <h2 id="cmpPrompt">Which website would you trust?</h2>
+    <p class="lede" id="cmpContext"></p>
+    <div class="compare" id="cmpStage" style="margin-top:22px"></div>
+    <div id="cmpResult" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- ================= RESULTS ================= -->
+<section class="view" id="view-results">
+  <div class="wrap">
+    <div class="score-hero">
+      <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+        <defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#31e39a"/><stop offset="1" stop-color="#38d2ff"/></linearGradient></defs>
+        <circle class="track" cx="60" cy="60" r="52"/>
+        <circle class="val" id="ringVal" cx="60" cy="60" r="52" stroke-dasharray="327" stroke-dashoffset="327"/>
+      </svg>
+      <p class="eyebrow" style="margin-bottom:2px">YOUR RESULT</p>
+      <div class="big-score" id="resScore">0 / 0</div>
+      <p style="color:var(--muted);margin-top:6px"><b id="resPct">0%</b> accuracy</p>
+    </div>
+
+    <div class="grid g4" style="margin-top:18px">
+      <div class="tile"><b id="tAtt">0</b><span>Questions attempted</span></div>
+      <div class="tile"><b id="tCorr">0</b><span>Correct answers</span></div>
+      <div class="tile"><b id="tWrong">0</b><span>Incorrect answers</span></div>
+      <div class="tile"><b id="tAcc">0%</b><span>Accuracy</span></div>
+      <div class="tile"><b id="tFlags">0</b><span>Red flags identified</span></div>
+      <div class="tile"><b id="tCats" style="font-size:1.05rem">—</b><span>Categories played</span></div>
+    </div>
+
+    <div class="badge-band">
+      <p class="eyebrow" style="margin-bottom:4px">YOUR PHISHING AWARENESS</p>
+      <h3 id="resBadge" style="font-size:1.5rem">—</h3>
+      <p style="color:var(--muted);margin:0" id="resMsg"></p>
+      <p class="disclaimer">This is an educational score from a practice simulator. It is not a cybersecurity certification or an assessment of any real account's security.</p>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <h3>Add your score to the local leaderboard</h3>
+      <p style="color:var(--muted);font-size:.93rem">Nickname only, please. Don't enter your real name, phone number, email or anything else personal — scores are stored in this browser and nowhere else.</p>
+      <div class="opt-row" style="margin-top:4px">
+        <input class="nick" id="nickInput" maxlength="14" placeholder="e.g. CyberFox" aria-label="Nickname for leaderboard">
+        <button class="btn btn-sm" id="saveScore">Save score</button>
+        <span class="qmeta" id="saveMsg"></span>
+      </div>
+    </div>
+
+    <div class="opt-row" style="margin-top:22px">
+      <button class="btn btn-primary" id="againBtn">Try again</button>
+      <button class="btn" data-go="participant-details">Enter symposium quiz</button>
+      <button class="btn" id="reviewBtn">Review answers</button>
+      <button class="btn btn-ghost" data-go="learn">Learn phishing</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= REVIEW ================= -->
+<section class="view" id="view-review">
+  <div class="wrap">
+    <p class="eyebrow">ROUND REVIEW</p>
+    <h2>Every question, explained</h2>
+    <p class="lede">Open any question to see what you answered, what the right call was, and the clues that decided it.</p>
+    <div id="reviewList" style="margin-top:24px"></div>
+    <div class="opt-row"><button class="btn" data-go="results">← Back to result</button><button class="btn btn-primary" id="againBtn2">Play again</button></div>
+  </div>
+</section>
+
+<!-- ================= LEARN ================= -->
+<section class="view" id="view-learn">
+  <div class="wrap">
+    <p class="eyebrow">PHISHING 101</p>
+    <h2>The vocabulary of social engineering</h2>
+    <p class="lede">Phishing has a family of variants, each named for the channel it arrives through. The trick underneath is always the same: borrow trust you haven't earned, then rush the target.</p>
+    <div style="margin-top:26px" id="learnList"></div>
+
+    <hr class="sep">
+    <h2>Before you click</h2>
+    <p class="lede">A short checklist that catches most of what you'll meet in a normal week.</p>
+    <div class="grid g2" style="margin-top:22px" id="checklist"></div>
+
+    <div class="alert-band">
+      <div class="big">STAY ALERT</div>
+      <p style="color:var(--muted);max-width:56ch;margin:10px auto 0">Slowing down for ten seconds defeats most phishing. Urgency is the attacker's only real weapon — take it away and the message falls apart.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FLAGS ================= -->
+<section class="view" id="view-flags">
+  <div class="wrap">
+    <p class="eyebrow">SPOT THE RED FLAGS</p>
+    <h2>Ten warning signs worth memorising</h2>
+    <p class="lede">You rarely need all ten. One clear flag is enough to stop and verify through a channel you chose yourself.</p>
+    <div class="grid g2" style="margin-top:26px" id="flagCards"></div>
+    <div class="opt-row"><button class="btn btn-primary" data-go="hunt-pick">Practise finding them →</button></div>
+  </div>
+</section>
+
+<!-- ================= LEADERBOARD ================= -->
+<section class="view" id="view-board">
+  <div class="wrap">
+    <p class="eyebrow">LOCAL LEADERBOARD</p>
+    <h2>Top scores on this device</h2>
+    <p class="lede">Stored in this browser only, using nicknames. Clearing your browser data clears the board.</p>
+    <div class="card" style="margin-top:22px">
+      <table class="lb"><thead><tr><th>Rank</th><th>Player</th><th>Score</th><th>Mode</th></tr></thead><tbody id="lbBody"></tbody></table>
+    </div>
+    <div class="opt-row"><button class="btn btn-sm btn-ghost" id="clearBoard">Clear leaderboard</button></div>
+  </div>
+</section>
+
+<!-- ================= ABOUT ================= -->
+<section class="view" id="view-about">
+  <div class="wrap narrow">
+    <p class="eyebrow">ABOUT</p>
+    <h2>About PhishGuard</h2>
+    <p class="lede">PhishGuard is an educational cybersecurity awareness platform designed to help users recognize phishing, smishing, fake websites, QR-based attacks and other social-engineering techniques.</p>
+    <div class="card" style="margin-top:22px">
+      <h3>Built for cybersecurity awareness</h3>
+      <p style="color:var(--muted)">This is a college symposium educational project. Every email, message, website and QR scenario in it is invented for training. Brand names, domains, reference numbers and people are fictional, and any resemblance to a real organisation is unintentional.</p>
+      <h3 style="margin-top:20px">What this project does not do</h3>
+      <ul style="color:var(--muted);padding-left:20px">
+        <li>The participant quiz never requests real account passwords, OTPs or payment details. The admin password is only for the configurable demo login.</li>
+        <li>Login fields in the mockups are visual only — they are disabled and submit nothing.</li>
+        <li>Links inside scenarios are not clickable and lead nowhere.</li>
+        <li>The symposium portal stores participant details and quiz attempts in this browser for the organizer to review.</li>
+        <li>This static demo has no backend; client-side admin login is not production-grade authentication.</li>
+      </ul>
+      <h3 style="margin-top:20px">How to run it at a stand</h3>
+      <p style="color:var(--muted);margin:0">Open the page and choose <b>ENTER QUIZ</b>. Participants provide their symposium details, then take three rounds of 10, 10 and 5 questions without seeing answer feedback or scores.</p>
+    </div>
+    <div class="opt-row"><button class="btn btn-primary" id="symposiumBtn2">🎓 Launch symposium quiz</button><button class="btn" data-go="participant-details">ENTER QUIZ</button></div>
+  </div>
+</section>
+
+<!-- ================= PARTICIPANT REGISTRATION ================= -->
+<section class="view" id="view-participant-details">
+  <div class="wrap narrow">
+    <p class="eyebrow">PARTICIPANT ENTRY</p>
+    <h2>WELCOME, PARTICIPANT</h2>
+    <p class="lede">Enter your details to continue. No participant username or password is needed.</p>
+    <form class="card participant-form portal-entry-form" id="participantForm" novalidate>
+      <label>FULL NAME<input name="fullName" autocomplete="name" required maxlength="100" placeholder="Enter your full name"></label>
+      <label>COLLEGE NAME<input name="college" autocomplete="organization" required maxlength="150" placeholder="Enter your college name"></label>
+      <label>EMAIL ID<input name="email" type="email" autocomplete="email" required maxlength="254" placeholder="Enter your email"></label>
+      <label>PHONE NUMBER<input name="phone" type="tel" autocomplete="tel" required maxlength="20" placeholder="Enter your phone number"></label>
+      <label>YEAR<select name="year" required><option value="">Select Year</option><option>I Year</option><option>II Year</option><option>III Year</option><option>IV Year</option></select></label>
+      <label>DEPARTMENT<input name="department" required maxlength="100" placeholder="Select / enter department"></label>
+      <p class="form-error" id="participantError" role="alert" aria-live="polite"></p>
+      <button class="btn btn-primary" type="submit">ENTER →</button>
+      <p class="privacy-note">Your details and answers are stored in this browser for the symposium administrator. This static demo is not suitable for real sensitive data.</p>
+    </form>
+  </div>
+</section>
+
+<!-- ================= THREE-ROUND PARTICIPANT QUIZ ================= -->
+<section class="view" id="view-contest-quiz">
+  <div class="wrap">
+    <div class="quizbar">
+      <div class="qmeta"><span id="contestRound">ROUND 1</span> · Question <b id="contestNow">1</b> of <b id="contestTotal">10</b></div>
+      <div class="bar"><i id="contestBar"></i></div>
+      <div class="qmeta">Overall progress <b id="contestProgress">1 / 25</b></div>
+    </div>
+    <div class="card">
+      <div id="contestStage"></div>
+      <div class="answer-zone">
+        <p class="ask">What do you think?</p>
+        <div class="verdicts">
+          <button class="verdict contest-choice" id="contestLegit">LEGITIMATE</button>
+          <button class="verdict contest-choice" id="contestPhish">PHISHING</button>
+        </div>
+        <div id="contestNext" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="view-round-transition">
+  <div class="wrap narrow">
+    <div class="card transition-card">
+      <p class="eyebrow" id="transitionEyebrow">ROUND 1 COMPLETED</p>
+      <h2 id="transitionTitle">Get ready for Round 2</h2>
+      <p class="lede" id="transitionDescription"></p>
+      <button class="btn btn-primary" id="startNextRound">START ROUND 2 →</button>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="view-completion">
+  <div class="wrap narrow">
+    <div class="card transition-card">
+      <p class="eyebrow">SUBMISSION RECEIVED</p>
+      <h2>QUIZ COMPLETED</h2>
+      <p class="lede">Thank you for participating in PHISHGUARD. Your responses have been successfully recorded.</p>
+      <p>Your participation has been submitted to the administrator.</p>
+      <p class="qmeta">Attempt ID: <b id="completedAttemptId"></b></p>
+      <button class="btn btn-primary" data-go="home">RETURN TO HOME</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= ADMIN AUTHENTICATION ================= -->
+<section class="view" id="view-admin-login">
+  <div class="wrap narrow">
+    <p class="eyebrow">RESTRICTED ORGANIZER ACCESS</p>
+    <h2>ADMIN PORTAL</h2>
+    <p class="lede">Department of Cyber Security – Symposium</p>
+    <form class="card participant-form portal-entry-form admin-auth-form" id="adminLoginForm">
+      <label>ADMIN ID<input name="adminId" autocomplete="username" required></label>
+      <label>PASSWORD<input name="password" type="password" autocomplete="current-password" required></label>
+      <p class="form-error" id="adminLoginError" role="alert" aria-live="polite"></p>
+      <button class="btn btn-primary" type="submit">ACCESS PORTAL →</button>
+      <p class="privacy-note">Demo authentication only. A production deployment requires server-side authentication.</p>
+    </form>
+  </div>
+</section>
+
+<!-- ================= ADMIN DASHBOARD ================= -->
+<section class="view" id="view-admin">
+  <div class="wrap admin-wrap">
+    <div class="admin-heading">
+      <div><p class="eyebrow">SYMPOSIUM ORGANIZER CONSOLE</p><h2>PHISHGUARD ADMIN PORTAL</h2></div>
+      <button class="btn btn-sm" id="adminLogout">LOGOUT</button>
+    </div>
+    <div class="grid g4 admin-stats">
+      <div class="tile"><b id="adminTotal">0</b><span>Total participants</span></div>
+      <div class="tile"><b id="adminCompleted">0</b><span>Completed attempts</span></div>
+      <div class="tile"><b id="adminProgress">0</b><span>In progress</span></div>
+      <div class="tile"><b id="adminAverage">—</b><span>Average score / 25</span></div>
+    </div>
+    <div class="card admin-filters">
+      <h3>Participants</h3>
+      <div class="filter-grid">
+        <input id="adminSearch" type="search" placeholder="Search participants..." aria-label="Search participants">
+        <select id="filterCollege" aria-label="Filter by college"><option value="">All colleges</option></select>
+        <select id="filterDepartment" aria-label="Filter by department"><option value="">All departments</option></select>
+        <select id="filterYear" aria-label="Filter by year"><option value="">All years</option><option>I Year</option><option>II Year</option><option>III Year</option><option>IV Year</option></select>
+        <select id="filterStatus" aria-label="Filter by status"><option value="">All statuses</option><option>Completed</option><option>In Progress</option></select>
+        <select id="sortParticipants" aria-label="Sort participants"><option value="recent">Newest first</option><option value="score-desc">Score: highest first</option><option value="score-asc">Score: lowest first</option><option value="name">Name A–Z</option></select>
+      </div>
+      <div class="opt-row">
+        <button class="btn btn-sm btn-primary" id="exportResults">EXPORT RESULTS CSV</button>
+        <button class="btn btn-sm" id="exportAnswers">EXPORT DETAILED ANSWERS CSV</button>
+        <span class="qmeta" id="adminCount"></span>
+      </div>
+      <p class="form-error" id="adminError" role="alert"></p>
+      <div class="table-scroll">
+        <table class="admin-table">
+          <thead><tr><th>ID</th><th>Name</th><th>College</th><th>Email</th><th>Phone</th><th>Year</th><th>Department</th><th>Score</th><th>Accuracy</th><th>Status</th></tr></thead>
+          <tbody id="participantRows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card participant-detail" id="participantDetail" hidden></div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <span>PhishGuard — an educational phishing simulator. All scenarios are fictional.</span>
+    <span>Think before you click.</span>
+  </div>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/data.js"></script>
+<script src="js/admin-config.js"></script>
+<script src="js/data-service.js"></script>
+<script src="js/auth-service.js"></script>
+<script src="js/participant-service.js"></script>
+<script src="js/quiz-service.js"></script>
+<script src="js/cinematic-intro.js"></script>
+<script src="js/app.js"></script>
+<script src="js/portal.js"></script>
+<script>
+/* Optional offline support. Skipped when opened directly from the file system. */
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+</script>
+</body>
+</html>
