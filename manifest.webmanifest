@@ -1,0 +1,13 @@
+{
+  "name": "PhishGuard — Can You Spot the Phish?",
+  "short_name": "PhishGuard",
+  "description": "An educational phishing-awareness simulator. All scenarios are fictional.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#04070c",
+  "theme_color": "#04070c",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
