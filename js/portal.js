@@ -9,6 +9,7 @@
   let monitoringGeneration = 0;
   let monitoringParticipants = new Map();
   let monitoringEvents = [];
+  let centralAttempts = new Map();
 
   function esc(value) {
     return String(value == null ? "" : value).replace(/[&<>"]/g, char =>
@@ -59,7 +60,7 @@
   function startAttempt(saved) {
     attempt = saved;
     sessionStorage.setItem(ACTIVE_KEY, attempt.id);
-    PGMonitoringService.start(attempt);
+    PGMonitoringService.start(attempt, participantId => sessionStorage.setItem(ACTIVE_KEY, participantId));
     showCurrentQuestion();
   }
 
@@ -203,7 +204,7 @@
     if (record.status === "Completed" && Number.isFinite(record.score)) return record.score;
     return PGQuizService.score(record).total;
   }
-  function attempts() { return PGDataService.getAttempts(); }
+  function attempts() { return [...centralAttempts.values()]; }
   function updateFilterOptions(records) {
     [["#filterCollege", "college", "All colleges"], ["#filterDepartment", "department", "All departments"]]
       .forEach(([selector, key, label]) => {
@@ -349,7 +350,14 @@
         $("#liveParticipants").replaceChildren();
         for (const person of data.participants) renderMonitorParticipant(person);
         monitoringEvents = data.events || [];
+        centralAttempts = new Map((data.attempts || []).map(record => [record.id, record]));
         renderMonitorFeed();
+        renderDashboard();
+        return;
+      }
+      if (data.type === "attempt-upsert" && data.attempt) {
+        centralAttempts.set(data.attempt.id, data.attempt);
+        renderDashboard();
         return;
       }
       if (data.type === "upsert" && data.participant) renderMonitorParticipant(data.participant);
@@ -373,6 +381,7 @@
       stopMonitoringStream = null;
       monitoringParticipants.clear();
       monitoringEvents = [];
+      centralAttempts.clear();
       $("#monitorConnection").textContent = "DISCONNECTED";
       $("#monitorConnection").classList.remove("connected");
   }
@@ -416,7 +425,7 @@
   function renderParticipantDetail(id) {
     const detail = $("#participantDetail");
     try {
-      const record = PGParticipantService.get(id);
+      const record = centralAttempts.get(id);
       if (!record) throw new Error("Participant record was not found.");
       const p = record.participant;
       const scores = PGQuizService.score(record).roundScores;

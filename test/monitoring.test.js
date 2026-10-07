@@ -60,6 +60,31 @@ function cookieFrom(response) {
   return cookie ? cookie.split(";")[0] : "";
 }
 
+function participantAttempt(name = "Test Participant") {
+  return {
+    id: "device-local-id",
+    participant: {
+      fullName: name,
+      college: "Untrusted client value",
+      email: "invalid@example.test",
+      phone: "",
+      department: "Untrusted",
+      year: "Untrusted"
+    },
+    startedAt: new Date(0).toISOString(),
+    completedAt: null,
+    status: "In Progress",
+    questionIds: Array.from({ length: 25 }, (_, index) => `question-${index + 1}`),
+    answers: [],
+    currentRound: 1,
+    currentQuestion: 0,
+    totalQuestions: 25,
+    roundScores: { 1: 0, 2: 0, 3: 0 },
+    score: null,
+    accuracy: null
+  };
+}
+
 async function readUntil(reader, marker) {
   const decoder = new TextDecoder();
   let text = "";
@@ -176,6 +201,19 @@ test("participant events are append-only, isolated from answers, and visible liv
   participantCookie = cookieFrom(start.response);
   quizSessionId = start.result.quizSessionId;
 
+  const blockedAttempt = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    body: { quizSessionId, attempt: participantAttempt() }
+  });
+  assert.equal(blockedAttempt.response.status, 401);
+  const savedAttempt = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie: participantCookie,
+    body: { quizSessionId, attempt: participantAttempt() }
+  });
+  assert.equal(savedAttempt.response.status, 200);
+  assert.equal(savedAttempt.result.participantId, start.result.participantId);
+
   const params = { quizSessionId, round: 1, questionNumber: 4 };
   const hiddenEventId = "51c6f357-6a62-4e93-b160-4aadef160001";
   for (const eventType of ["TAB_HIDDEN", "WINDOW_BLUR", "RETURNED", "FULLSCREEN_EXIT"]) {
@@ -200,6 +238,12 @@ test("participant events are append-only, isolated from answers, and visible liv
 
   const adminRead = await jsonRequest("/api/admin/monitor/snapshot", { cookie: adminCookie });
   assert.equal(adminRead.response.status, 200);
+  const attempt = adminRead.result.attempts.find(item => item.id === start.result.participantId);
+  assert.ok(attempt);
+  assert.equal(attempt.id, start.result.participantId);
+  assert.equal(attempt.participant.fullName, "Test Participant");
+  assert.equal(attempt.participant.college, "Example College");
+  assert.equal(attempt.startedAt, start.result.timestamp);
   const participant = adminRead.result.participants.find(item => item.quizSessionId === quizSessionId);
   assert.equal(participant.tabSwitches, 1);
   assert.equal(participant.focusLosses, 1);
@@ -272,6 +316,15 @@ test("admin event stream publishes independent participant sessions and updated 
   assert.match(liveText, /"deviceType":"MOBILE"/);
   assert.match(liveText, /"loginTime":/);
 
+  const mobileAttempt = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie: mobileCookie,
+    body: { quizSessionId: mobileStart.result.quizSessionId, attempt: participantAttempt("Mobile Participant") }
+  });
+  assert.equal(mobileAttempt.response.status, 200);
+  const attemptUpdate = await readUntil(reader, '"type":"attempt-upsert"');
+  assert.match(attemptUpdate, new RegExp(mobileStart.result.participantId));
+
   const progress = await jsonRequest("/api/monitor/events", {
     method: "POST",
     cookie: mobileCookie,
@@ -287,6 +340,46 @@ test("admin event stream publishes independent participant sessions and updated 
   assert.match(progressUpdate, /"type":"upsert"/);
   assert.match(progressUpdate, /"questionNumber":2/);
 
+  for (let index = 1; index <= 8; index++) {
+    const name = `Global Participant ${index}`;
+    const startRequestId = crypto.randomUUID();
+    const participantStart = await jsonRequest("/api/monitor/sessions", {
+      method: "POST",
+      body: {
+        startRequestId,
+        participant: {
+          fullName: name,
+          college: "Example College",
+          email: `global-${index}@example.test`,
+          phone: "",
+          department: "Security",
+          year: "I Year"
+        },
+        round: 1,
+        questionNumber: 1
+      },
+      userAgent: index % 2
+        ? "Mozilla/5.0 (Linux; Android 15; Mobile)"
+        : "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    });
+    assert.equal(participantStart.response.status, 201);
+    const independentCookie = cookieFrom(participantStart.response);
+    const sessionUpdate = await readUntil(reader, name);
+    assert.match(sessionUpdate, /"type":"upsert"/);
+
+    const record = await jsonRequest("/api/monitor/attempts", {
+      method: "POST",
+      cookie: independentCookie,
+      body: {
+        quizSessionId: participantStart.result.quizSessionId,
+        attempt: participantAttempt(name)
+      }
+    });
+    assert.equal(record.response.status, 200);
+    const recordUpdate = await readUntil(reader, '"type":"attempt-upsert"');
+    assert.match(recordUpdate, new RegExp(participantStart.result.participantId));
+  }
+
   const retriedStart = await jsonRequest("/api/monitor/sessions", {
     method: "POST",
     cookie: mobileCookie,
@@ -296,7 +389,8 @@ test("admin event stream publishes independent participant sessions and updated 
   assert.equal(retriedStart.result.quizSessionId, mobileStart.result.quizSessionId);
   assert.equal(retriedStart.result.participantId, mobileStart.result.participantId);
   const snapshot = await jsonRequest("/api/admin/monitor/snapshot", { cookie: adminCookie });
-  assert.equal(snapshot.result.participants.length, 2);
+  assert.equal(snapshot.result.participants.length, 10);
+  assert.equal(snapshot.result.attempts.length, 10);
 
   await reader.cancel();
   const reconnected = await fetch(`${baseUrl}/api/admin/monitor/stream`, {
@@ -429,6 +523,9 @@ test("participant monitoring retries transient start and event failures without 
         quizSessionId: "787393d5-af8c-4d2c-b591-6c1879f09501",
         participantId: "PG-2026-0001"
       }) };
+    }
+    if (url.endsWith("/attempts")) {
+      return { ok: true, status: 200, json: async () => ({ participantId: "PG-2026-0001" }) };
     }
     assert.ok(url.endsWith("/events"), `Unexpected monitoring request: ${url}`);
     events.push(body);

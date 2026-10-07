@@ -53,6 +53,62 @@ function parseRoundQuestion(body) {
   return { round, questionNumber };
 }
 
+function normalizeAttempt(attempt, row) {
+  if (!attempt || typeof attempt !== "object" || Array.isArray(attempt) ||
+      !Array.isArray(attempt.questionIds) || attempt.questionIds.length !== 25 ||
+      !attempt.questionIds.every(id => isText(id, 80)) ||
+      new Set(attempt.questionIds).size !== 25 ||
+      !Array.isArray(attempt.answers) || attempt.answers.length > 25 ||
+      !Number.isInteger(attempt.currentRound) || attempt.currentRound < 1 || attempt.currentRound > 3 ||
+      !Number.isInteger(attempt.currentQuestion) || attempt.currentQuestion < 0 ||
+      attempt.currentQuestion > ROUND_SIZES[attempt.currentRound - 1] ||
+      attempt.totalQuestions !== 25 ||
+      !["In Progress", "Completed"].includes(attempt.status) ||
+      !attempt.roundScores || typeof attempt.roundScores !== "object" ||
+      ![1, 2, 3].every(round => Number.isInteger(attempt.roundScores[round]) &&
+        attempt.roundScores[round] >= 0 && attempt.roundScores[round] <= ROUND_SIZES[round - 1])) {
+    return null;
+  }
+  const answerIds = new Set();
+  for (const answer of attempt.answers) {
+    if (!answer || !attempt.questionIds.includes(answer.questionId) ||
+        answerIds.has(answer.questionId) ||
+        ![1, 2, 3].includes(answer.round) ||
+        !["legitimate", "phishing"].includes(answer.choice)) return null;
+    answerIds.add(answer.questionId);
+  }
+  if (attempt.status === "Completed" &&
+      (attempt.currentRound !== 3 || attempt.currentQuestion !== ROUND_SIZES[2] ||
+       attempt.answers.length !== 25 || !Number.isInteger(attempt.score) ||
+       attempt.score < 0 || attempt.score > 25 ||
+       !Number.isInteger(attempt.accuracy) || attempt.accuracy < 0 ||
+       attempt.accuracy > 100 || !isText(attempt.completedAt, 40) ||
+       Number.isNaN(Date.parse(attempt.completedAt)))) return null;
+
+  return {
+    id: row.participant_id,
+    participant: {
+      fullName: row.participant_name,
+      college: row.college,
+      email: row.email,
+      phone: row.phone,
+      department: row.department,
+      year: row.year
+    },
+    startedAt: row.created_at,
+    completedAt: attempt.status === "Completed" ? attempt.completedAt : null,
+    status: attempt.status,
+    questionIds: attempt.questionIds,
+    answers: attempt.answers,
+    currentRound: attempt.currentRound,
+    currentQuestion: attempt.currentQuestion,
+    totalQuestions: 25,
+    roundScores: attempt.roundScores,
+    score: attempt.status === "Completed" ? attempt.score : null,
+    accuracy: attempt.status === "Completed" ? attempt.accuracy : null
+  };
+}
+
 function deviceType(userAgent = "") {
   if (/ipad|tablet|kindle|silk/i.test(userAgent)) return "TABLET";
   if (/mobile|iphone|ipod|android/i.test(userAgent)) return "MOBILE";
@@ -113,6 +169,14 @@ function createDatabase(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS monitor_events_recent
       ON quiz_monitor_events(timestamp DESC);
+    CREATE TABLE IF NOT EXISTS participant_attempts (
+      quiz_session_id TEXT PRIMARY KEY REFERENCES quiz_monitor_sessions(quiz_session_id),
+      participant_id TEXT NOT NULL UNIQUE,
+      attempt_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS participant_attempts_updated
+      ON participant_attempts(updated_at DESC);
   `);
   const sessionColumns = db.pragma("table_info(quiz_monitor_sessions)");
   if (!sessionColumns.some(column => column.name === "client_start_id")) {
@@ -264,6 +328,15 @@ function createApp(options = {}) {
     `),
     updateOwner: db.prepare(`
       UPDATE quiz_monitor_sessions SET owner_sid = ? WHERE quiz_session_id = ?
+    `),
+    saveAttempt: db.prepare(`
+      INSERT INTO participant_attempts (quiz_session_id, participant_id, attempt_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(quiz_session_id) DO UPDATE SET
+        attempt_json = excluded.attempt_json, updated_at = excluded.updated_at
+    `),
+    allAttempts: db.prepare(`
+      SELECT attempt_json FROM participant_attempts ORDER BY updated_at DESC
     `)
   };
   const adminStreams = new Map();
@@ -332,7 +405,8 @@ function createApp(options = {}) {
       serverTime: serverTimestamp(),
       backendInstanceId,
       participants: statements.activeSessions.all(cutoff).map(row => snapshotParticipant(row, now)),
-      events: statements.recentEvents.all(cutoff)
+      events: statements.recentEvents.all(cutoff),
+      attempts: statements.allAttempts.all().map(row => JSON.parse(row.attempt_json))
     };
   }
   function publishParticipant(row, event = null) {
@@ -343,6 +417,16 @@ function createApp(options = {}) {
       ? { type: "upsert", participant: snapshotParticipant(row), event }
       : { type: "remove", quizSessionId: row.quiz_session_id, event };
     const payload = `event: monitor\ndata: ${JSON.stringify(message)}\n\n`;
+    for (const response of adminStreams.keys()) {
+      if (!response.write(payload)) {
+        response.end();
+        adminStreams.delete(response);
+      }
+    }
+  }
+  function publishAttempt(attempt) {
+    if (adminStreams.size === 0) return;
+    const payload = `event: monitor\ndata: ${JSON.stringify({ type: "attempt-upsert", attempt })}\n\n`;
     for (const response of adminStreams.keys()) {
       if (!response.write(payload)) {
         response.end();
@@ -580,7 +664,7 @@ function createApp(options = {}) {
     scheduleStaleRefresh(resumedRow);
     publishParticipant(resumedRow,
       monitorEvent(resumedRow, eventType, timestamp, question.round, question.questionNumber, durationSeconds, eventId));
-    res.json({ quizSessionId: row.quiz_session_id, timestamp });
+    res.json({ quizSessionId: row.quiz_session_id, participantId: row.participant_id, timestamp });
   });
   app.post("/api/monitor/events", requireSameOriginJson, requireParticipant, (req, res, next) => {
     const { quizSessionId, eventType, clientEventId } = req.body;
@@ -684,6 +768,25 @@ function createApp(options = {}) {
         monitorStatus(row) === "STALE";
       if (progressChanged) publishParticipant(savedRow, progressEvent(insertedEventId));
       res.status(201).json({ timestamp, recorded: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/monitor/attempts", requireSameOriginJson, requireParticipant, (req, res, next) => {
+    const { quizSessionId, attempt } = req.body;
+    if (!isText(quizSessionId, 80)) {
+      return res.status(400).json({ error: "Participant quiz session is invalid." });
+    }
+    const row = statements.findOwnedSession.get(quizSessionId, req.sessionID);
+    if (!row) return res.status(404).json({ error: "Participant quiz session was not found." });
+    const record = normalizeAttempt(attempt, row);
+    if (!record) return res.status(400).json({ error: "Participant quiz attempt is invalid." });
+    const updatedAt = serverTimestamp();
+    try {
+      statements.saveAttempt.run(quizSessionId, row.participant_id, JSON.stringify(record), updatedAt);
+      publishAttempt(record);
+      res.status(200).json({ participantId: row.participant_id, updatedAt });
     } catch (error) {
       next(error);
     }

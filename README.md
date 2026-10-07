@@ -52,11 +52,16 @@ reconnects the stream automatically. Participant monitoring retries transient
 network failures with backoff and deduplicates retried session/event writes.
 The participant quiz displays a warning if its monitoring session cannot reach
 the backend. Routine progress heartbeats update participant presence without
-creating audit-event rows or broadcasting unchanged snapshots. Quiz answers and
-completed-attempt reports remain in the participant browser's localStorage; the
-central live monitor stores and synchronizes active quiz-session details. The
-service worker checks the network for current app code and falls back to its
-cache when offline.
+creating audit-event rows or broadcasting unchanged snapshots. The complete
+attempt (participant details, answers, progress, and scores) is
+stored in that same SQLite database. The participant browser keeps a local
+resume cache, but the admin dashboard, participant details, and exports read
+only from the server's authenticated initial snapshot and incremental SSE
+updates. Attempts are upserted when created or changed; the admin does not
+poll or reload the full list after each change. The service worker checks the
+network for current app code and falls back to its cache when offline; it does
+not cache API requests or make offline attempts appear in the central admin
+portal.
 
 ### Deploying on Render
 
@@ -94,8 +99,10 @@ not a photorealistic 3D render; it uses no external assets or libraries. The
 intro can be skipped and respects reduced-motion preferences.
 
 Choose **ENTER SYMPOSIUM** to enter participant details and start the 25-question
-competition. Answers and participant details are saved locally without
-correct/incorrect feedback or scores being shown to the participant. Choose
+competition. Participant details and answers are sent to the shared server
+without correct/incorrect feedback or scores being shown to the participant.
+The admin portal shows records from the centralized database, not the admin
+browser's local storage. Choose
 **ADMIN LOGIN** to review attempts, question-wise answers, and export CSV files.
 The admin portal also displays server-recorded tab visibility, focus, fullscreen,
 question progress, and return events for active quizzes. Activity is telemetry
@@ -120,7 +127,7 @@ monitoring records.
     js/app.js               Existing learning activities and shared screen router
     server.js               Admin-authenticated monitoring API and SQLite store
     js/monitoring-service.js Browser lifecycle events and admin SSE client
-    js/data-service.js      Local storage adapter for participant attempts
+    js/data-service.js      Participant-device resume cache
     js/auth-service.js      Server-backed admin session handling
     js/participant-service.js Participant IDs and attempt persistence
     js/quiz-service.js      Three-round selection and internal scoring
@@ -200,9 +207,11 @@ This is a simulator. It never becomes the thing it teaches about.
 - Links and buttons inside scenarios are disabled and lead nowhere.
 - Every brand, domain, person, amount and reference number is invented.
   Resemblance to a real organisation is unintentional.
-- Participant details, attempts, and the admin session are held in browser
-  storage for this local demonstration. Do not use real sensitive data in a
-  production deployment.
+- Participant details, attempts, and monitoring sessions are stored in the
+  server-side SQLite database. On Render, keep the persistent disk mounted and
+  the Web Service on a single instance; participant browsers must use the same
+  deployed HTTPS origin for the frontend and API. The browser's local attempt
+  cache is for resuming an in-progress quiz only, not the admin data source.
 - Admin identity is checked on the server using `PHISHGUARD_ADMIN_ID` and the
   salted scrypt hash in `PHISHGUARD_ADMIN_PASSWORD_HASH`; browser storage and
   source files do not contain admin credentials. Admin sessions use server-side
@@ -213,9 +222,10 @@ This is a simulator. It never becomes the thing it teaches about.
   report browser lifecycle events only for their own server-issued session.
   The browser cannot reliably report hidden-tab activity if the device loses
   connectivity or is forcibly terminated.
-- Participant answers and attempt details remain in localStorage in this demo.
-  For production handling of real participant data, move quiz submissions and
-  participant identity to a trusted server-side workflow as well.
+- Participant answers and attempt details are written to the authenticated
+  participant session's server-side record and delivered to admins through
+  authenticated SSE. The local browser copy is a resume cache, not the system
+  of record.
 - Existing learning, red-flag hunt, website comparison, and nickname leaderboard
   features remain available.
 

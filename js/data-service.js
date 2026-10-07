@@ -26,6 +26,9 @@
       else attempts[index] = attempt;
       saveAttempts(attempts);
       return attempt;
+    },
+    removeAttempt(id) {
+      saveAttempts(readAttempts().filter(attempt => attempt.id !== id));
     }
   });
 })();

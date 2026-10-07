@@ -407,8 +407,8 @@
         <li>The participant quiz never requests real account passwords, OTPs or payment details. The admin password is only for the configurable demo login.</li>
         <li>Login fields in the mockups are visual only — they are disabled and submit nothing.</li>
         <li>Links inside scenarios are not clickable and lead nowhere.</li>
-        <li>The symposium portal stores participant details and quiz attempts in this browser for the organizer to review.</li>
-        <li>This static demo has no backend; client-side admin login is not production-grade authentication.</li>
+        <li>With the PhishGuard server running, participant details and quiz attempts are stored in its shared database for the authenticated organizer to review.</li>
+        <li>The participant browser keeps a resume cache; it is not the admin data source. Use the deployed HTTPS Web Service URL on every device.</li>
       </ul>
       <h3 style="margin-top:20px">How to run it at a stand</h3>
       <p style="color:var(--muted);margin:0">Open the page and choose <b>ENTER QUIZ</b>. Participants provide their symposium details, then take three rounds of 10, 10 and 5 questions without seeing answer feedback or scores.</p>
@@ -432,7 +432,7 @@
       <label>DEPARTMENT<input name="department" required maxlength="100" placeholder="Select / enter department"></label>
       <p class="form-error" id="participantError" role="alert" aria-live="polite"></p>
       <button class="btn btn-primary" type="submit">ENTER →</button>
-      <p class="privacy-note">Your details and answers are stored in this browser for the symposium administrator. This static demo is not suitable for real sensitive data.</p>
+      <p class="privacy-note">Your details and answers are sent to the PhishGuard server and shared with the symposium administrator. A network connection to the server is required for global synchronization.</p>
     </form>
   </div>
 </section>

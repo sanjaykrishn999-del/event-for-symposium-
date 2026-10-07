@@ -22,8 +22,13 @@
   let eventRetryCount = 0;
   let startPromise = null;
   let eventFlushPromise = null;
+  let attemptSyncPromise = null;
+  let attemptSyncRetry = 0;
+  let attemptSyncRetryCount = 0;
+  let latestAttempt = null;
   let listenersAttached = false;
   let statusHandler = null;
+  let identityHandler = null;
   const pendingEvents = [];
 
   function newId() {
@@ -101,8 +106,18 @@
 
   async function resumeIfPresent() {
     if (!sessionId) return false;
-    await post(`${API}/sessions/${encodeURIComponent(sessionId)}/resume`, { round, questionNumber });
-    return true;
+    return post(`${API}/sessions/${encodeURIComponent(sessionId)}/resume`, { round, questionNumber });
+  }
+
+  function applyServerIdentity(attempt, result) {
+    if (!result.participantId) return;
+    const changed = attempt.id !== result.participantId;
+    attempt.id = result.participantId;
+    attempt.startedAt = result.timestamp;
+    if (changed && window.PGParticipantService) {
+      window.PGParticipantService.reidentify(attempt, result.participantId, result.timestamp);
+    }
+    if (identityHandler) identityHandler(result.participantId);
   }
 
   function scheduleEventRetry(error) {
@@ -113,6 +128,50 @@
       eventRetry = 0;
       flushEvents();
     }, delay);
+  }
+
+  function scheduleAttemptRetry(error) {
+    if (!latestAttempt || !isRetryable(error) || attemptSyncRetry) return;
+    const delay = Math.min(1000 * (2 ** attemptSyncRetryCount), MAX_RETRY_MS);
+    attemptSyncRetryCount++;
+    attemptSyncRetry = window.setTimeout(() => {
+      attemptSyncRetry = 0;
+      syncAttempt(latestAttempt);
+    }, delay);
+  }
+
+  function flushAttemptSync() {
+    if (attemptSyncPromise) return attemptSyncPromise;
+    if (!sessionId || !latestAttempt) return Promise.resolve(false);
+    attemptSyncPromise = (async () => {
+      while (sessionId && latestAttempt) {
+        const attempt = latestAttempt;
+        latestAttempt = null;
+        try {
+          await post(`${API}/attempts`, { quizSessionId: sessionId, attempt });
+          attemptSyncRetryCount = 0;
+          if (statusHandler) statusHandler(null);
+        } catch (error) {
+          latestAttempt = latestAttempt || attempt;
+          reportError(error);
+          if (isRetryable(error)) scheduleAttemptRetry(error);
+          else latestAttempt = null;
+          return false;
+        }
+      }
+      return true;
+    })().finally(() => {
+      attemptSyncPromise = null;
+      if (latestAttempt && !attemptSyncRetry) flushAttemptSync();
+      finalizeSession();
+    });
+    return attemptSyncPromise;
+  }
+
+  function syncAttempt(attempt) {
+    if (!attempt) return Promise.resolve(false);
+    latestAttempt = attempt;
+    return flushAttemptSync();
   }
 
   function flushEvents() {
@@ -195,7 +254,9 @@
     sessionId = sessionStorage.getItem(SESSION_KEY) || "";
     if (sessionId) {
       try {
-        await resumeIfPresent();
+        const result = await resumeIfPresent();
+        applyServerIdentity(attempt, result);
+        await syncAttempt(attempt);
         return;
       } catch (error) {
         if (![401, 404, 409].includes(error.status) && !error.retryable) throw error;
@@ -230,10 +291,13 @@
     });
     sessionId = result.quizSessionId;
     sessionStorage.setItem(SESSION_KEY, sessionId);
+    applyServerIdentity(attempt, result);
+    await syncAttempt(attempt);
   }
 
-  function start(attempt) {
+  function start(attempt, onIdentity) {
     if (!attempt || attempt.status !== "In Progress" || active || finishing) return Promise.resolve();
+    identityHandler = typeof onIdentity === "function" ? onIdentity : null;
     pendingAttempt = attempt;
     attachListeners();
     if (startPromise) return startPromise;
@@ -256,6 +320,11 @@
 
   function onOnline() {
     if (!active && pendingAttempt) start(pendingAttempt);
+    if (latestAttempt) syncAttempt(latestAttempt);
+    if (attemptSyncRetry) {
+      window.clearTimeout(attemptSyncRetry);
+      attemptSyncRetry = 0;
+    }
     if (eventRetry) {
       window.clearTimeout(eventRetry);
       eventRetry = 0;
@@ -306,6 +375,7 @@
     if (!active || !attempt || attempt.status !== "In Progress") return;
     round = attempt.currentRound;
     questionNumber = Math.min(attempt.currentQuestion + 1, window.PGQuizService.roundSize(round));
+    syncAttempt(attempt);
     sendEvent("QUIZ_PROGRESS");
   }
 
@@ -318,6 +388,7 @@
     heartbeat = 0;
     if (startRetry) clearTimeout(startRetry);
     pendingAttempt = null;
+    syncAttempt(attempt);
     await Promise.race([
       sendEvent("QUIZ_COMPLETED"),
       new Promise(resolve => window.setTimeout(() => resolve(false), 1500))
@@ -327,7 +398,7 @@
   }
 
   function finalizeSession() {
-    if (!finishing || pendingEvents.length) return;
+    if (!finishing || pendingEvents.length || latestAttempt || attemptSyncPromise || attemptSyncRetry) return;
     finishing = false;
     if (eventRetry) window.clearTimeout(eventRetry);
     eventRetry = 0;
@@ -360,8 +431,8 @@
   function setStatusHandler(handler) {
     statusHandler = typeof handler === "function" ? handler : null;
   }
-
   window.PGMonitoringService = Object.freeze({
-    start, updateProgress, finish, adminSnapshot, subscribeAdmin, setStatusHandler
+    start, updateProgress, syncAttempt, finish, adminSnapshot, subscribeAdmin,
+    setStatusHandler
   });
 })();

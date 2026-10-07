@@ -27,17 +27,32 @@
     return data().saveAttempt(attempt);
   }
 
+  function save(attempt) {
+    const saved = data().saveAttempt(attempt);
+    if (window.PGMonitoringService) window.PGMonitoringService.syncAttempt(attempt);
+    return saved;
+  }
+
+  function reidentify(attempt, participantId, startedAt) {
+    const previousId = attempt.id;
+    attempt.id = participantId;
+    attempt.startedAt = startedAt;
+    if (previousId !== participantId) data().removeAttempt(previousId);
+    return data().saveAttempt(attempt);
+  }
+
   window.PGParticipantService = Object.freeze({
     create,
     get: id => data().getAttempt(id),
-    save: attempt => data().saveAttempt(attempt),
+    save,
+    reidentify,
     finish(attempt, score, roundScores) {
       attempt.status = "Completed";
       attempt.completedAt = new Date().toISOString();
       attempt.score = score;
       attempt.accuracy = Math.round(score / attempt.totalQuestions * 100);
       attempt.roundScores = roundScores;
-      return data().saveAttempt(attempt);
+      return save(attempt);
     }
   });
 })();
