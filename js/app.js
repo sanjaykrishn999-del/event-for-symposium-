@@ -209,14 +209,28 @@ function renderQuestion(){
     },1000);
   }
 }
-function answer(choice){
+async function answer(choice){
   if(S.locked) return; S.locked=true; clearInterval(S.timerId);
   const q=S.list[S.i];
-  const correct = choice===q.answer;
+  let evaluation;
+  try {
+    const response = await fetch("/api/practice/evaluate", {
+      method:"POST", credentials:"same-origin",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({questionId:q.id,choice})
+    });
+    evaluation = await response.json();
+    if(!response.ok) throw new Error(evaluation.error||"Answer review is unavailable.");
+  } catch(error) {
+    S.locked=false;
+    $("#feedback").innerHTML=`<p class="form-error">${esc(error.message)} Please retry while connected to the PhishGuard server.</p>`;
+    return;
+  }
+  const correct = evaluation.correct;
   S.answered++;
-  if(correct){S.score++; S.flagsFound += q.flags.length;}
+  if(correct){S.score++; S.flagsFound += evaluation.flags.length;}
   else if(S.useLives){S.lives--;}
-  S.results.push({q,choice,correct});
+  S.results.push({q,choice,correct,...evaluation});
 
   const bl=$("#btnLegit"), bp=$("#btnPhish");
   [bl,bp].forEach(b=>b.disabled=true);
@@ -224,14 +238,14 @@ function answer(choice){
   else if(choice==="phishing"){bp.classList.add("chosen");bl.classList.add("faded");}
   else {bl.classList.add("faded");bp.classList.add("faded");}
 
-  const truthLabel = q.answer==="phishing" ? "This is a phishing attempt." : "This message is legitimate.";
+  const truthLabel = evaluation.correctAnswer==="phishing" ? "This is a phishing attempt." : "This message is legitimate.";
   const head = choice===null ? "⏱️ TIME'S UP" : (correct ? "🎉 CORRECT!" : "⚠️ NOT QUITE!");
   const sub  = choice===null ? "No answer recorded — here's what it was. " + truthLabel
              : (correct ? truthLabel : "You answered "+choice+". "+truthLabel);
 
-  const flagsHTML = q.flags.length ? `
+  const flagsHTML = evaluation.flags.length ? `
     <h4 style="margin:18px 0 0;font-size:.95rem">🚩 RED FLAGS ${correct?"FOUND":"YOU CAN USE NEXT TIME"}</h4>
-    <ul class="flags">${q.flags.map((f,i)=>`<li style="animation-delay:${i*70}ms"><span>🚩</span><span>${f}</span></li>`).join("")}</ul>`
+    <ul class="flags">${evaluation.flags.map((f,i)=>`<li style="animation-delay:${i*70}ms"><span>🚩</span><span>${f}</span></li>`).join("")}</ul>`
   : `<h4 style="margin:18px 0 0;font-size:.95rem">✅ WHY THIS ONE IS SAFE</h4>
      <ul class="flags"><li><span>✅</span><span>No red flags: the sender, the domain and the request all match, and the message asks nothing of you that it shouldn't.</span></li></ul>`;
 
@@ -240,8 +254,8 @@ function answer(choice){
       <div class="fb-head"><span>${head}</span></div>
       <p style="color:var(--muted);margin:0">${esc(sub)}</p>
       ${flagsHTML}
-      <p style="margin-top:16px">${q.explanation}</p>
-      <div class="tip"><b>SECURITY TIP</b>${q.tip}</div>
+      <p style="margin-top:16px">${evaluation.explanation}</p>
+      <div class="tip"><b>SECURITY TIP</b>${evaluation.tip}</div>
       <div class="next-row">
         ${S.useLives&&S.lives<=0?`<span class="qmeta" style="align-self:center">Out of lives — but the round continues. Learning beats losing.</span>`:""}
         <button class="btn btn-primary" id="nextBtn">${S.i+1>=S.list.length?"See my result":"Next question →"}</button>
@@ -303,12 +317,12 @@ function renderReview(){
       <div class="inner">
         <div class="kv">
           <span>Your answer: <b>${r.choice?esc(r.choice):"no answer"}</b></span>
-          <span>Correct answer: <b>${esc(q.answer)}</b></span>
+          <span>Correct answer: <b>${esc(r.correctAnswer)}</b></span>
           <span>Result: <b>${r.correct?"Correct":"Incorrect"}</b></span>
         </div>
-        ${q.flags.length?`<b style="font-size:.9rem">Important red flags</b><ul class="flags">${q.flags.map(f=>`<li><span>🚩</span><span>${f}</span></li>`).join("")}</ul>`:`<b style="font-size:.9rem">Why it was safe</b><p style="color:var(--muted);font-size:.92rem">Nothing in this message asked you to act, and the sender, domain and request all matched.</p>`}
-        <p style="margin-top:14px">${q.explanation}</p>
-        <div class="tip"><b>SECURITY TIP</b>${q.tip}</div>
+        ${r.flags.length?`<b style="font-size:.9rem">Important red flags</b><ul class="flags">${r.flags.map(f=>`<li><span>🚩</span><span>${f}</span></li>`).join("")}</ul>`:`<b style="font-size:.9rem">Why it was safe</b><p style="color:var(--muted);font-size:.92rem">Nothing in this message asked you to act, and the sender, domain and request all matched.</p>`}
+        <p style="margin-top:14px">${r.explanation}</p>
+        <div class="tip"><b>SECURITY TIP</b>${r.tip}</div>
       </div></details>`;
   }).join("");
 }

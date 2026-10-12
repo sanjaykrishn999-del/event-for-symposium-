@@ -1,6 +1,24 @@
 /* Fixed three-round quiz rules and private score calculation. */
 (function () {
-  const ROUND_SIZES = Object.freeze([10, 10, 5]);
+  const ROUND_SIZES = Object.freeze([15, 15, 10]);
+  const ROUND_DIFFICULTY = Object.freeze(["easy", "medium", "hard"]);
+  const HINTS = Object.freeze({
+    e1: "Compare the sender's actual domain with the address you normally use for your bank.",
+    e2: "Notice whether this message asks you to click, sign in, or share anything.",
+    e5: "Check who sent this and whether you expected a delivery payment request.",
+    e9: "Look at the destination and urgency before interacting with a message about a prize.",
+    s1: "Read the full web address and consider why a delivery service is asking for a fee.",
+    s2: "Think about whether an unexpected caller should need a code from your phone.",
+    w1: "Inspect the complete domain in the address bar rather than relying on page branding.",
+    q1: "Preview where the code leads and consider whether the request fits the poster's context.",
+    b1: "Compare the sender's domain to the institute's official web address.",
+    b2: "Consider what the sender asks you to do and whether the message uses a trusted channel.",
+    b3: "Inspect the domain and payment request before following a delivery link.",
+    b4: "Unexpected files can be risky even when the display name looks familiar.",
+    b5: "Confirm the exact domain and how you arrived at this sign-in page.",
+    b6: "Check the destination preview and whether the location and request make sense.",
+    b7: "A one-time code is a security factor; consider who should ever receive it.",
+  });
 
   function questionsFor(attempt) {
     const byId = new Map(QUESTIONS.map(question => [question.id, question]));
@@ -15,16 +33,25 @@
   window.PGQuizService = Object.freeze({
     roundSizes: ROUND_SIZES,
     selectQuestions() {
-      const ids = QUESTIONS.map(question => question.id);
-      for (let index = ids.length - 1; index > 0; index--) {
-        const target = Math.floor(Math.random() * (index + 1));
-        [ids[index], ids[target]] = [ids[target], ids[index]];
-      }
-      return ids.slice(0, 25);
+      return ROUND_DIFFICULTY.flatMap(difficulty => {
+        const ids = QUESTIONS.filter(question => question.difficulty === difficulty).map(question => question.id);
+        for (let index = ids.length - 1; index > 0; index--) {
+          const target = Math.floor(Math.random() * (index + 1));
+          [ids[index], ids[target]] = [ids[target], ids[index]];
+        }
+        const round = ROUND_DIFFICULTY.indexOf(difficulty);
+        if (ids.length !== ROUND_SIZES[round]) {
+          throw new Error(`Round ${round + 1} must contain exactly ${ROUND_SIZES[round]} questions.`);
+        }
+        return ids;
+      });
     },
     questionAt(attempt) {
       const { start } = roundBounds(attempt.currentRound);
       return questionsFor(attempt)[start + attempt.currentQuestion] || null;
+    },
+    hintFor(question) {
+      return question.difficulty === "easy" ? HINTS[question.id] || null : null;
     },
     roundSize: round => ROUND_SIZES[round - 1],
     overallIndex(attempt) {
@@ -43,14 +70,12 @@
       return window.PGParticipantService.save(attempt);
     },
     score(attempt) {
-      const byId = new Map(QUESTIONS.map(question => [question.id, question]));
-      const roundScores = { 1: 0, 2: 0, 3: 0 };
-      for (const answer of attempt.answers) {
-        if (byId.get(answer.questionId)?.answer === answer.choice) roundScores[answer.round]++;
-      }
+      const roundScores = attempt.roundScores || { 1: 0, 2: 0, 3: 0 };
       return {
         roundScores,
-        total: Object.values(roundScores).reduce((sum, score) => sum + score, 0)
+        total: Number.isInteger(attempt.score)
+          ? attempt.score
+          : Object.values(roundScores).reduce((sum, score) => sum + score, 0)
       };
     }
   });

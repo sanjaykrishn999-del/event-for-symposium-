@@ -8,6 +8,9 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { after, before, test } = require("node:test");
 const { createApp } = require("../server");
+const answerKey = require("../private/quiz-answer-key.json");
+const questionIds = Object.keys(answerKey).sort((left, right) =>
+  answerKey[left].round - answerKey[right].round || left.localeCompare(right));
 
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "phishguard-monitor-"));
 const testPassword = "a-long-test-password";
@@ -74,11 +77,11 @@ function participantAttempt(name = "Test Participant") {
     startedAt: new Date(0).toISOString(),
     completedAt: null,
     status: "In Progress",
-    questionIds: Array.from({ length: 25 }, (_, index) => `question-${index + 1}`),
+    questionIds,
     answers: [],
     currentRound: 1,
     currentQuestion: 0,
-    totalQuestions: 25,
+    totalQuestions: 40,
     roundScores: { 1: 0, 2: 0, 3: 0 },
     score: null,
     accuracy: null
@@ -270,6 +273,112 @@ test("participant events are append-only, isolated from answers, and visible liv
     body: { quizSessionId, round: 1, questionNumber: 2, eventType: "QUIZ_PROGRESS" }
   });
   assert.equal(backwards.response.status, 409);
+
+  const incompleteAttempt = participantAttempt();
+  incompleteAttempt.questionIds = questionIds;
+  incompleteAttempt.currentRound = 3;
+  incompleteAttempt.currentQuestion = 9;
+  incompleteAttempt.answers = questionIds.slice(0, 39).map((id, index) => ({
+    questionId: id,
+    round: answerKey[id].round,
+    choice: answerKey[id].answer
+  }));
+  const incomplete = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie: participantCookie,
+    body: { quizSessionId, attempt: incompleteAttempt }
+  });
+  assert.equal(incomplete.response.status, 200);
+  assert.equal(Object.hasOwn(incomplete.result, "review"), false);
+  assert.equal(Object.hasOwn(incomplete.result, "score"), false);
+
+  const partialCompletion = {
+    ...incompleteAttempt,
+    currentQuestion: 10,
+    answers: questionIds.map((id, index) => ({
+      questionId: id,
+      round: answerKey[id].round,
+      choice: [0, 15, 30].includes(index)
+        ? (answerKey[id].answer === "phishing" ? "legitimate" : "phishing")
+        : answerKey[id].answer
+    })),
+    status: "Completed",
+    completedAt: new Date().toISOString()
+  };
+  const forged = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie: participantCookie,
+    body: { quizSessionId, attempt: { ...partialCompletion, answers: partialCompletion.answers.slice(0, 39) } }
+  });
+  assert.equal(forged.response.status, 400);
+
+  const completed = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie: participantCookie,
+    body: { quizSessionId, attempt: partialCompletion }
+  });
+  assert.equal(completed.response.status, 200);
+  assert.equal(completed.result.score, 37);
+  assert.deepEqual(completed.result.roundScores, { 1: 14, 2: 14, 3: 9 });
+  assert.deepEqual(completed.result.review.map(item => item.round), [1, 2, 3]);
+  assert.equal(completed.result.review.length, 3);
+  assert.equal(completed.result.review[0].choice, partialCompletion.answers[0].choice);
+  assert.equal(completed.result.review[0].correctAnswer, answerKey[questionIds[0]].answer);
+  assert.equal(completed.result.review[0].explanation, answerKey[questionIds[0]].explanation);
+
+  const revealedDuringQuiz = await jsonRequest("/api/practice/evaluate", {
+    method: "POST",
+    cookie: participantCookie,
+    body: { questionId: questionIds[1], choice: answerKey[questionIds[1]].answer }
+  });
+  assert.equal(revealedDuringQuiz.response.status, 403);
+});
+
+test("a perfect 40/40 quiz completes with no incorrect-answer review", async () => {
+  const start = await jsonRequest("/api/monitor/sessions", {
+    method: "POST",
+    body: {
+      startRequestId: crypto.randomUUID(),
+      participant: {
+        fullName: "Perfect Score Participant",
+        college: "Example College",
+        email: "perfect@example.test",
+        department: "Security",
+        year: "I Year"
+      },
+      round: 1,
+      questionNumber: 1
+    }
+  });
+  assert.equal(start.response.status, 201);
+  const ids = questionIds;
+  const answers = ids.map(questionId => ({
+    questionId,
+    round: answerKey[questionId].round,
+    choice: answerKey[questionId].answer
+  }));
+  const result = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie: cookieFrom(start.response),
+    body: {
+      quizSessionId: start.result.quizSessionId,
+      attempt: {
+        ...participantAttempt("Perfect Score Participant"),
+        id: start.result.participantId,
+        questionIds: ids,
+        answers,
+        currentRound: 3,
+        currentQuestion: 10,
+        completedAt: new Date().toISOString(),
+        status: "Completed"
+      }
+    }
+  });
+  assert.equal(result.response.status, 200);
+  assert.equal(result.result.score, 40);
+  assert.deepEqual(result.result.roundScores, { 1: 15, 2: 15, 3: 10 });
+  assert.equal(result.result.accuracy, 100);
+  assert.deepEqual(result.result.review, []);
 });
 
 test("admin event stream publishes independent participant sessions and updated progress", async t => {
@@ -389,8 +498,8 @@ test("admin event stream publishes independent participant sessions and updated 
   assert.equal(retriedStart.result.quizSessionId, mobileStart.result.quizSessionId);
   assert.equal(retriedStart.result.participantId, mobileStart.result.participantId);
   const snapshot = await jsonRequest("/api/admin/monitor/snapshot", { cookie: adminCookie });
-  assert.equal(snapshot.result.participants.length, 10);
-  assert.equal(snapshot.result.attempts.length, 10);
+  assert.equal(snapshot.result.participants.length, 11);
+  assert.equal(snapshot.result.attempts.length, 11);
 
   await reader.cancel();
   const reconnected = await fetch(`${baseUrl}/api/admin/monitor/stream`, {
@@ -413,7 +522,10 @@ test("admin event stream publishes independent participant sessions and updated 
 });
 
 test("private monitoring database and server configuration are not static assets", async () => {
-  for (const asset of ["/server.js", "/package.json", "/data/monitor.sqlite", "/js/admin-config.js"]) {
+  for (const asset of [
+    "/server.js", "/package.json", "/data/monitor.sqlite",
+    "/private/quiz-answer-key.json", "/js/admin-config.js"
+  ]) {
     const response = await fetch(`${baseUrl}${asset}`);
     assert.equal(response.status, 404, `${asset} should not be publicly served`);
   }
@@ -525,7 +637,13 @@ test("participant monitoring retries transient start and event failures without 
       }) };
     }
     if (url.endsWith("/attempts")) {
-      return { ok: true, status: 200, json: async () => ({ participantId: "PG-2026-0001" }) };
+      return { ok: true, status: 200, json: async () => ({
+        participantId: "PG-2026-0001",
+        score: 40,
+        roundScores: { 1: 15, 2: 15, 3: 10 },
+        accuracy: 100,
+        review: []
+      }) };
     }
     assert.ok(url.endsWith("/events"), `Unexpected monitoring request: ${url}`);
     events.push(body);

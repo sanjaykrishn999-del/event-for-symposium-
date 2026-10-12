@@ -19,7 +19,7 @@
       answers: [],
       currentRound: 1,
       currentQuestion: 0,
-      totalQuestions: 25,
+      totalQuestions: 40,
       roundScores: { 1: 0, 2: 0, 3: 0 },
       score: null,
       accuracy: null
@@ -29,7 +29,9 @@
 
   function save(attempt) {
     const saved = data().saveAttempt(attempt);
-    if (window.PGMonitoringService) window.PGMonitoringService.syncAttempt(attempt);
+    const serverVerified = attempt.status === "Completed" &&
+      Number.isInteger(attempt.score) && Array.isArray(attempt.resultReview);
+    if (window.PGMonitoringService && !serverVerified) window.PGMonitoringService.syncAttempt(attempt);
     return saved;
   }
 
@@ -46,12 +48,11 @@
     get: id => data().getAttempt(id),
     save,
     reidentify,
-    finish(attempt, score, roundScores) {
+    finish(attempt) {
       attempt.status = "Completed";
       attempt.completedAt = new Date().toISOString();
-      attempt.score = score;
-      attempt.accuracy = Math.round(score / attempt.totalQuestions * 100);
-      attempt.roundScores = roundScores;
+      attempt.score = null;
+      attempt.accuracy = null;
       return save(attempt);
     }
   });

@@ -1,0 +1,431 @@
+{
+  "e1": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "Everything about the pretext is designed to stop you from thinking: an overnight timestamp, an account already 'restricted', and a countdown. The decisive clue is the domain. A real bank sends from the domain you already use for banking, and it never routes you to a login page through an email button.",
+    "flags": [
+      "Sender domain is <code>aurorabank-verify-now.tk</code>, not the bank's own domain",
+      "Generic greeting with a spelling error: “Vaued Customer”",
+      "Artificial 24-hour deadline creating pressure",
+      "Link uses plain <code>http://</code> and a scripted login page",
+      "Banks don't ask you to re-verify an account through an emailed link"
+    ],
+    "tip": "Never trust a message simply because it looks professional. Check the actual sender address and the destination URL before anything else."
+  },
+  "e2": {
+    "round": 1,
+    "answer": "legitimate",
+    "explanation": "This is a normal internal notice. It sends you to a portal you already use rather than to a link, asks for nothing, applies no pressure, and offers an offline way to resolve problems — a counter with staff and your ID card. A notice that removes reasons to click is the opposite of phishing.",
+    "flags": [],
+    "tip": "Announcements that tell you to log in the way you normally do — instead of through their link — are behaving correctly."
+  },
+  "e3": {
+    "round": 2,
+    "answer": "legitimate",
+    "explanation": "This one is only credible because you pressed the reset button a moment ago — context decides it. The mechanics are right too: a first-party subdomain, a short single-use window, no threat, and an explicit 'ignore this' path that leaves you safe by doing nothing. Phishing almost never gives you a safe way to do nothing.",
+    "flags": [],
+    "tip": "A genuine reset email is harmless when you ignore it. If a message punishes inaction, that's the pressure talking."
+  },
+  "e4": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "The low price is the clever part: it lowers your guard enough to hand over card details, which are the real target. Providers do warn you about full storage, but they stop new uploads rather than threatening to destroy what you've already saved, and billing always lives on their own domain.",
+    "flags": [
+      "Domain is <code>nimbusdrive-alerts.co</code> — a lookalike, not the real service domain",
+      "Threat of permanent file deletion in 48 hours",
+      "A tiny price (₹49) designed to feel harmless enough to pay without thinking",
+      "Payment link goes to the lookalike domain, not the provider's billing page",
+      "Storage providers stop uploads when you're full — they don't delete your backups as a penalty"
+    ],
+    "tip": "Check pricing and storage from inside the app or its official site. Never through the button in the warning email."
+  },
+  "e5": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "The ₹35 is never the point. The payment page collects a full card number, expiry and CVV, which is worth far more than the fee. Couriers charge redelivery at the door or inside their own app, and a tracking number quoted at you proves nothing — attackers invent them.",
+    "flags": [
+      "Lookalike domain <code>swiftpost-redelivery.info</code>",
+      "A tiny fee requested by email — the classic card-harvesting pretext",
+      "12-hour deadline before the parcel is 'returned'",
+      "Insecure <code>http://</code> payment link",
+      "You may not even be expecting a parcel, yet a tracking number is supplied to make it feel real"
+    ],
+    "tip": "Track parcels only from the courier's official app or the order page of the shop you bought from."
+  },
+  "e6": {
+    "round": 3,
+    "answer": "phishing",
+    "explanation": "This one survives a quick glance because the salary is plausible and the tone is corporate. Three things kill it: the homoglyph domain where <code>rn</code> imitates <code>m</code> at small sizes, the double extension on the attachment, and the deposit. In most jurisdictions charging a candidate to start work is illegal, and no real employer collects Aadhaar, PAN and banking details over email before you've spoken to a human.",
+    "flags": [
+      "Domain uses <code>rn</code> in place of <code>m</code>: <code>rneridian-analytics.com</code>",
+      "An offer for a job you never applied to or interviewed for",
+      "A refundable 'equipment deposit' — legitimate employers never charge candidates",
+      "Identity documents and a cancelled cheque requested by email",
+      "Attachment is <code>.pdf.exe</code> — an executable wearing a document's name",
+      "Three-day deadline to stop you from verifying"
+    ],
+    "tip": "Read domains character by character. Pairs like rn/m, vv/w, l/I and 0/O exist precisely to survive a fast reading."
+  },
+  "e7": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "The 6-digit code is the tell. An attacker who already has your password still can't get in, so they need you to hand over the second factor in real time — which is why the pretext must feel urgent and flattering at once. Nobody legitimate will ever ask for that code.",
+    "flags": [
+      "Sender domain <code>pulse-badge-review.com</code> is not the platform's domain",
+      "Explicitly asks for your password <i>and</i> your 6-digit code",
+      "Flatters you with a badge you never applied for",
+      "A six-month penalty for not acting within 24 hours",
+      "Verification is handled inside the app, never by an emailed sign-in link"
+    ],
+    "tip": "A one-time code is the last thing standing between an attacker and your account. Never type it anywhere you didn't navigate to yourself."
+  },
+  "e8": {
+    "round": 3,
+    "answer": "legitimate",
+    "explanation": "Refund emails are a favourite phishing pretext, so scepticism is right — but examine what this one actually asks for. Nothing. It references a specific order you made, refunds to the original payment method rather than asking where to send money, gives a realistic bank timeline, and points you back into the app. A refund scam must ask for card or UPI details to work; this never does.",
+    "flags": [],
+    "tip": "Genuine refunds go back the way the money came. Anyone asking where to send your refund is setting up a payment, not a refund."
+  },
+  "e9": {
+    "round": 1,
+    "answer": "legitimate",
+    "explanation": "An informational message from the institution's own domain, with no link, no attachment, no credentials and nothing to pay. There is simply no mechanism here for an attacker to profit — which is a useful way to evaluate any message: ask what the sender would gain if they were hostile.",
+    "flags": [],
+    "tip": "Ask what a message wants from you. If the honest answer is 'nothing', the risk is close to zero."
+  },
+  "s1": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "KYC is the most reliable pretext in Indian smishing because everyone has genuinely been asked for it at some point. The giveaways are structural rather than linguistic: banks send from short alphabetic sender IDs, not personal mobile numbers, and they never shorten their own links.",
+    "flags": [
+      "Arrives from an ordinary mobile number, not the bank's registered sender ID",
+      "Shortened link hides the real destination",
+      "All-caps 'BLOCKED' and the threat of permanent closure",
+      "KYC updates are never completed through an SMS link",
+      "Sent at 02:41 — outside any bank's operating hours"
+    ],
+    "tip": "If a bank SMS worries you, don't use its link. Open the bank's own app or call the number printed on your card."
+  },
+  "s2": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "The missing vowel in the domain is doing the work here. Notice also how little the message knows: no parcel ID, no merchant, no address fragment. Real courier notifications are specific because they're generated from an actual shipment record.",
+    "flags": [
+      "Domain misspelled as <code>swftpost-track.co</code>",
+      "Sent from a personal mobile number",
+      "No tracking number, no item description, no sender name",
+      "'Today' creates urgency without any real deadline",
+      "Delivery problems are resolved in the courier's own app"
+    ],
+    "tip": "Vagueness is a clue. A message that can't name your order probably doesn't have one."
+  },
+  "s3": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "This is advance-fee fraud in SMS form. The fee is the entire scheme — there is no prize. Replying is costly even if you never pay, because a confirmed active number gets sold on and escalated to a vishing call where a persuasive 'agent' walks you through a transfer.",
+    "flags": [
+      "A prize from a competition you never entered",
+      "Advance 'processing fee' before any payout",
+      "48-hour window to prevent you from thinking it over",
+      "Replying confirms your number is live and invites a voice-phishing call",
+      "No organiser named, no draw reference, no terms"
+    ],
+    "tip": "You cannot win a draw you didn't enter, and no legitimate prize requires you to pay first. Don't reply — delete."
+  },
+  "s4": {
+    "round": 2,
+    "answer": "legitimate",
+    "explanation": "A real OTP message and a phishing message can sit next to each other in the same thread, so judge the structure. This one contains no link, states the exact amount, merchant and time so you can recognise the transaction, warns you that the bank will never ask for the code, and gives an official number to call. It asks you to do nothing at all.",
+    "flags": [],
+    "tip": "The danger with a genuine OTP isn't the message — it's the person who phones a minute later asking you to read it out. Never do."
+  },
+  "s5": {
+    "round": 3,
+    "answer": "phishing",
+    "explanation": "This is a task scam, and it's deliberately patient. The first few small tasks really do pay, which is what makes victims trust the deposit step — after which the 'unlock' amounts grow and nothing is ever paid out again. The structural flaw is constant: real employers pay you, in the other direction.",
+    "flags": [
+      "Unsolicited job offer from an unsaved international number",
+      "Pay that doesn't match one hour of unskilled work",
+      "A deposit required to 'unlock' better-paying tasks",
+      "Recruitment run entirely over chat, with no company email or interview",
+      "Small early payouts are used to build trust before the large loss"
+    ],
+    "tip": "Money should only ever flow from the employer to you. Any job that asks you to pay first is a scam, however professional the chat."
+  },
+  "s6": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "Naming a far-away city is a cheap trick — it triggers alarm while proving nothing. The 'ignore if this was you' line is there to make the message feel balanced and considerate, which lowers suspicion. Check any login alert by opening the app and reading its security or devices page yourself.",
+    "flags": [
+      "Link domain <code>pulse-secure-login.net</code> is not the platform's domain",
+      "Sent from a personal mobile number",
+      "A distant foreign city adds alarm without adding evidence",
+      "Two-hour suspension countdown",
+      "Platforms deliver security alerts in-app and by registered email, not by SMS link"
+    ],
+    "tip": "Security alerts should be verified in the app's own settings, never through the link that raised the alarm."
+  },
+  "w1": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "Read the domain from the right, not the left: the part just before the first single slash is who actually owns the page — here, <code>verify-account.co</code>. Everything to its left is decoration the attacker chose freely. A bank asking for an ATM PIN in a browser confirms it.",
+    "flags": [
+      "No HTTPS — the address bar shows <code>http://</code> and 'Not secure'",
+      "The real brand appears only as a subdomain of <code>verify-account.co</code>",
+      "A countdown timer pressuring you to sign in",
+      "Asks for your ATM PIN, which no bank website needs",
+      "An interruption popup invents a security problem"
+    ],
+    "tip": "Find the real domain by reading right to left from the first single slash. That's the owner; the rest is chosen by whoever registered it."
+  },
+  "w2": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "The padlock is the trap. HTTPS certificates are free and automated, so an attacker's fake page gets one in minutes — it tells you the traffic is encrypted, not that the recipient is trustworthy. The actual clue is the substituted character, which in many fonts is invisible at a glance.",
+    "flags": [
+      "The domain uses a capital I in place of the lowercase l: <code>puIse-social.com</code>",
+      "HTTPS is present but proves only that the connection is encrypted, not who owns the site",
+      "A hyphenated variant of a one-word brand name",
+      "You arrived here from a link rather than from your bookmark or the app"
+    ],
+    "tip": "The padlock says 'encrypted', not 'trustworthy'. Read the domain itself, and reach login pages from your own bookmarks."
+  },
+  "w3": {
+    "round": 2,
+    "answer": "legitimate",
+    "explanation": "A checkout page asking for card details is normal — that's what checkout is. What matters is how you got here and who owns the page. The domain is the shop's own, the path follows the flow you were already in, and the page shows your real order number, amount and delivery address. Nothing rushes you, and nothing interrupts.",
+    "flags": [],
+    "tip": "Paying is fine when you started the journey. Type the shop's address yourself instead of arriving from a link in a message."
+  },
+  "w4": {
+    "round": 3,
+    "answer": "phishing",
+    "explanation": "This is the hardest domain trick to see, because the brand appears exactly right — including the <code>.com</code>. But the dot after <code>.com</code> demotes the whole thing to a subdomain of <code>account-verify.net</code>. A subdomain can say anything its owner likes.",
+    "flags": [
+      "The real domain is <code>account-verify.net</code>; <code>nimbusdrive.com</code> is only a subdomain of it",
+      "Valid HTTPS on a hostile domain",
+      "A shared document used as bait to force a sign-in",
+      "You didn't ask for this document, and the sender isn't shown"
+    ],
+    "tip": "<code>brand.com.something-else.net</code> belongs to something-else.net. The last two labels before the first slash are the ones that count."
+  },
+  "w5": {
+    "round": 3,
+    "answer": "legitimate",
+    "explanation": "After several fakes it's tempting to flag everything, and that overcorrection is its own problem — awareness that blocks normal work gets abandoned. Here the brand is the registrable domain, <code>netbanking</code> is its own subdomain, HTTPS is present, only a customer ID and password are requested, and there's no countdown or popup. This is what the real thing looks like.",
+    "flags": [],
+    "tip": "Know what your bank's genuine login page looks like, and bookmark it. Recognising normal is what makes abnormal obvious."
+  },
+  "q1": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "Quishing works because a QR code is unreadable to humans — the check has to happen after the scan, in the preview URL your camera shows. Physical overlay stickers on parking meters and restaurant tables are now among the most common versions, and they cost an attacker almost nothing.",
+    "flags": [
+      "A sticker placed over the meter's original printed panel",
+      "Destination is an unofficial <code>.cc</code> domain over plain http",
+      "'No app needed' discourages you from using the official one",
+      "Nothing on the sticker names the municipality or a helpline",
+      "QR codes hide their destination until after you've scanned"
+    ],
+    "tip": "Read the URL preview before opening it, and feel the surface for a sticker edge over printed signage."
+  },
+  "q2": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "This is the single most effective UPI scam in India, and it survives on a genuine misunderstanding: people assume a QR code is directional. It isn't. Every payment QR authorises money leaving your account. There is no such thing as a scan-to-receive code — incoming money needs nothing from you at all.",
+    "flags": [
+      "Scanning a UPI QR <i>sends</i> money — it never receives it",
+      "The code has a payee and a fixed amount pre-filled",
+      "'Support' contacted you through chat rather than the merchant's app",
+      "Refunds return to the original payment method automatically"
+    ],
+    "tip": "You never scan anything, enter a PIN or approve a request to receive money. If a PIN is involved, money is going out."
+  },
+  "q3": {
+    "round": 2,
+    "answer": "legitimate",
+    "explanation": "A well-made poster gives you a way to skip the QR entirely: the destination is printed underneath in readable text, on the institution's own domain, and it matches what the scan resolves to. Registration collects a name and a seat, not a payment or a password.",
+    "flags": [],
+    "tip": "Good posters print the URL next to the code. When one is shown, type it instead — the code becomes a convenience, not a leap of faith."
+  },
+  "q4": {
+    "round": 3,
+    "answer": "phishing",
+    "explanation": "Ask why an email would contain a QR code at all — you're already on a device that can click. The answer is that images bypass link scanning, and your phone is a weaker environment: a truncated address bar, no corporate filtering, and you're probably walking. That deliberate device-hop is the red flag.",
+    "flags": [
+      "Sender domain <code>kettleandco-rewards.net</code> is a lookalike",
+      "A QR code inside an email exists to move you off your protected computer",
+      "Corporate email filters can scan links but not images of codes",
+      "An expiring reward you never earned",
+      "Your phone shows less of the URL and usually has fewer protections"
+    ],
+    "tip": "A QR code in an email is a way around your defences. Open the company's app or site on the device you're already using."
+  },
+  "a1": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "AI removed the error-spotting shortcut most people relied on — the grammar is perfect and the register is exactly right for accounts correspondence. So judge the request instead of the writing. A mid-relationship change of bank details is the highest-risk instruction in business email, and it should always be confirmed by phoning a number you already had on file.",
+    "flags": [
+      "Domain is <code>helix-supplies-billing.com</code>, not the vendor's usual domain",
+      "A change of bank account requested over email",
+      "Flawless, well-structured prose with no errors to catch",
+      "New details supplied only as an attachment, so nothing is searchable in the email body",
+      "Asks you to confirm the payee change, creating a paper trail that looks authorised"
+    ],
+    "tip": "When writing quality can no longer be your filter, the request itself becomes the test. Verify payment changes by voice, on a known number."
+  },
+  "a2": {
+    "round": 3,
+    "answer": "phishing",
+    "explanation": "Business email compromise adapted for chat. Each element disables one of your defences: the unsaved number prevents recognition, the meeting excuse blocks the phone call that would end it, secrecy stops you asking a colleague, and vouchers make the loss unrecoverable. The secrecy instruction alone is enough to refuse.",
+    "flags": [
+      "Authority figure messaging from an unsaved number",
+      "An excuse that blocks voice verification: 'in a meeting, can't take calls'",
+      "Gift vouchers — untraceable and irreversible once the codes are sent",
+      "Explicit instruction to keep it secret",
+      "Reimbursement promised later to justify you paying now",
+      "Profile photo copied from a public page"
+    ],
+    "tip": "Any request for secrecy plus urgency plus gift cards is fraud. Verify through a number or desk you already know — every time."
+  },
+  "a3": {
+    "round": 3,
+    "answer": "phishing",
+    "explanation": "Pretending a conversation already happened is a strong technique — a ticket number and a familiar tone make you search your memory rather than the message. The instruction is what condemns it: remote access plus a live sign-in hands over both your screen and your credentials. Legitimate support never needs to watch you type a password.",
+    "flags": [
+      "Domain is <code>nimbusdrive.help-desk.io</code>, not the provider's own",
+      "References a chat you never had, and a ticket you didn't open",
+      "Asks you to install remote-access software from an attachment",
+      "Wants you to sign in <i>while</i> a stranger is watching your screen",
+      "Remote-access installers are a standard step in support-impersonation fraud"
+    ],
+    "tip": "Never install remote-access software because an unexpected message asked you to. Open your own ticket through the official app instead."
+  },
+  "a4": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "Fear of losing money is a stronger motivator than the promise of gaining it, so fake charges outperform fake prizes. The phone number is the modern twist: calling feels safer than clicking, but it connects you to a scripted operator who walks you through a refund that's actually a transfer. Check subscriptions in your account or bank statement instead.",
+    "flags": [
+      "Domain <code>lumen-ai-account.com</code> is a lookalike",
+      "A charge you don't recognise, designed to make you react",
+      "Alarm about losing money reverses your caution and makes you hurry",
+      "Card digits '4417' are a guess — the shock does the work if they're wrong",
+      "The helpline number leads to the attacker, not the company"
+    ],
+    "tip": "Verify unexpected charges in your bank app or the service's own account page. Never through the number in the alerting email."
+  },
+  "a5": {
+    "round": 3,
+    "answer": "phishing",
+    "explanation": "The visible From address claims the institute's domain, but the receiving server reports DMARC failure: SPF and DKIM pass only for vidyanagar-payroll.com, which does not align with vidyanagar-institute.edu. The Reply-To also points outside the institute, and the URL's registrable domain is payroll-correction.net despite the institute name appearing as a subdomain. The request for both a campus password and bank details under a deadline confirms the risk. HTTPS would encrypt the connection, not authenticate the institution.",
+    "flags": [
+      "Trusted campus mail server reports dmarc=fail for the claimed From domain",
+      "SPF and DKIM pass for vidyanagar-payroll.com, not the visible vidyanagar-institute.edu domain",
+      "Reply-To points to an external payroll domain",
+      "The registrable URL domain is payroll-correction.net; the institute name is only a subdomain",
+      "Requests both a campus password and bank details under a same-day deadline"
+    ],
+    "tip": "A SPF or DKIM pass is not enough by itself: check that the authenticated domain aligns with the visible From domain, and verify sensitive requests through a known channel."
+  },
+  "e10": {
+    "round": 3,
+    "answer": "legitimate",
+    "explanation": "Transaction alerts are heavily imitated, so check the mechanics rather than the feeling. This one comes from the bank's own registrable domain, names the merchant, amount, card suffix and time so you can recognise the purchase, contains no link or button at all, and routes you to the app or the number on your own card. It also states plainly that the bank will never ask for your PIN or OTP — a line attackers avoid, because it contradicts what they are about to do.",
+    "flags": [],
+    "tip": "A real alert gives you enough detail to recognise the transaction and sends you to channels you already control. It never supplies its own phone number."
+  },
+  "b1": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "The display name is easy to copy, but the sender's actual domain is vidyanagar-password.help rather than the institute domain. Do not enter a password from an unexpected email; open the campus portal using your saved bookmark or contact IT independently.",
+    "flags": [
+      "The sender domain is not the institute's official domain",
+      "A midnight deadline pressures you to act",
+      "The link asks you to enter your password"
+    ],
+    "tip": "Check the part of an email address after @ and open account services using a bookmark you already trust."
+  },
+  "b2": {
+    "round": 1,
+    "answer": "legitimate",
+    "explanation": "This routine notice comes from the institute's domain, asks for no credentials or payment, contains no action link, and gives practical information only.",
+    "flags": [],
+    "tip": "A notice that requires no click, password, or urgent action is lower risk; verify important changes through the known campus channel."
+  },
+  "b3": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "The message uses a small fee and a deadline to make a payment link feel harmless. Verify a delivery through the courier's official app or a tracking number you entered yourself.",
+    "flags": [
+      "Unsolicited payment demand",
+      "Short deadline",
+      "Delivery link uses an unrelated domain"
+    ],
+    "tip": "Do not pay a delivery fee from an unexpected text link."
+  },
+  "b4": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "A familiar sender name is not enough to establish that an attachment is safe. Unexpected archives and urgency are reasons to confirm through the official student portal or examination office before opening it.",
+    "flags": [
+      "An unexpected archive is used instead of a normal notice",
+      "The message gives a same-day deadline",
+      "The attachment instructions are not independently verifiable"
+    ],
+    "tip": "When a school message unexpectedly changes an exam and includes an archive, verify it through a separate known channel."
+  },
+  "b5": {
+    "round": 1,
+    "answer": "legitimate",
+    "explanation": "The address is the institute's expected portal domain and was opened from a saved bookmark. A lock icon alone is not proof, but the independently trusted route and expected domain are good signs.",
+    "flags": [],
+    "tip": "Use a bookmark you created yourself and still check the complete domain before signing in."
+  },
+  "b6": {
+    "round": 1,
+    "answer": "legitimate",
+    "explanation": "The poster is in a known campus location, directs to the institute's domain, and does not ask for a student password or payment. If in doubt, confirm the network name with library staff.",
+    "flags": [],
+    "tip": "Check the destination shown by your camera before opening a QR link."
+  },
+  "b7": {
+    "round": 1,
+    "answer": "phishing",
+    "explanation": "A one-time code is an authentication factor. Legitimate support staff should not ask you to read it back; anyone who obtains it may be able to sign in as you.",
+    "flags": [
+      "A caller or texter asks you to disclose a one-time code",
+      "The identity claim is not independently verified"
+    ],
+    "tip": "Never share a one-time code. Contact support using the number or help portal you already know."
+  },
+  "m1": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "The QR code and official-looking poster do not authenticate the destination. The lookalike domain, urgent threat, and request to sign in to a financial account are strong indicators of credential theft.",
+    "flags": [
+      "Lookalike domain outside the institute's domain",
+      "Urgent threat to pause financial aid",
+      "A QR code hides the destination until scanned",
+      "The page requests credentials for a financial account"
+    ],
+    "tip": "Inspect the URL preview before opening a QR destination and verify financial notices through the official aid office."
+  },
+  "m2": {
+    "round": 2,
+    "answer": "legitimate",
+    "explanation": "This is a security alert in the installed provider app, gives a clear deny action for an unrecognized attempt, and explicitly does not ask for a code or link click. Deny an attempt you did not initiate and investigate using the official app.",
+    "flags": [],
+    "tip": "Approve only sign-ins you initiated; deny unexpected prompts and contact the provider through a known channel."
+  },
+  "m3": {
+    "round": 2,
+    "answer": "phishing",
+    "explanation": "In a URL, the hostname is nimbusdrive.com.login-check.support, whose registrable domain is login-check.support. The brand text appears only as a subdomain. Open the service directly and look for the shared document there.",
+    "flags": [
+      "The registrable domain is login-check.support, not nimbusdrive.com",
+      "A familiar sender address does not make the displayed link trustworthy",
+      "The unexpected sign-in request can harvest credentials"
+    ],
+    "tip": "Read a hostname from right to left and identify the registrable domain before signing in."
+  }
+}

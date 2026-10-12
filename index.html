@@ -411,7 +411,7 @@
         <li>The participant browser keeps a resume cache; it is not the admin data source. Use the deployed HTTPS Web Service URL on every device.</li>
       </ul>
       <h3 style="margin-top:20px">How to run it at a stand</h3>
-      <p style="color:var(--muted);margin:0">Open the page and choose <b>ENTER QUIZ</b>. Participants provide their symposium details, then take three rounds of 10, 10 and 5 questions without seeing answer feedback or scores.</p>
+      <p style="color:var(--muted);margin:0">Open the page and choose <b>ENTER QUIZ</b>. Participants provide their symposium details, then take three rounds of 15, 15 and 10 questions. Answers and scores are revealed only after all three rounds.</p>
     </div>
     <div class="opt-row"><button class="btn btn-primary" id="symposiumBtn2">🎓 Launch symposium quiz</button><button class="btn" data-go="participant-details">ENTER QUIZ</button></div>
   </div>
@@ -443,11 +443,15 @@
     <div class="quizbar">
       <div class="qmeta"><span id="contestRound">ROUND 1</span> · Question <b id="contestNow">1</b> of <b id="contestTotal">10</b></div>
       <div class="bar"><i id="contestBar"></i></div>
-      <div class="qmeta">Overall progress <b id="contestProgress">1 / 25</b></div>
+      <div class="qmeta">Overall progress <b id="contestProgress">1 / 40</b></div>
     </div>
     <div class="card">
       <p class="form-error monitoring-sync-warning" id="monitoringSyncStatus" role="status" aria-live="polite" hidden></p>
       <div id="contestStage"></div>
+      <div class="contest-hint-wrap">
+        <button class="btn btn-sm btn-ghost" id="showContestHint" type="button" aria-expanded="false">SHOW CLUE</button>
+        <p id="contestHint" class="contest-hint" role="note" hidden></p>
+      </div>
       <div class="answer-zone">
         <p class="ask">What do you think?</p>
         <div class="verdicts">
@@ -479,6 +483,14 @@
       <p class="lede">Thank you for participating in PHISHGUARD. Your responses have been successfully recorded.</p>
       <p>Your participation has been submitted to the administrator.</p>
       <p class="qmeta">Attempt ID: <b id="completedAttemptId"></b></p>
+      <div class="card" style="margin-top:18px">
+        <h3>FINAL RESULTS</h3>
+        <p class="big-score" id="completionScore">— / 40</p>
+        <p class="qmeta" id="completionRoundScores"></p>
+        <p class="form-error" id="completionError" role="alert" aria-live="polite"></p>
+        <div id="completionReview"></div>
+        <button class="btn btn-primary" id="completionRetry" hidden>RETRY RESULT VERIFICATION</button>
+      </div>
       <button class="btn btn-primary" data-go="home">RETURN TO HOME</button>
     </div>
   </div>
@@ -511,7 +523,7 @@
       <div class="tile"><b id="adminTotal">0</b><span>Total participants</span></div>
       <div class="tile"><b id="adminCompleted">0</b><span>Completed attempts</span></div>
       <div class="tile"><b id="adminProgress">0</b><span>In progress</span></div>
-      <div class="tile"><b id="adminAverage">—</b><span>Average score / 25</span></div>
+      <div class="tile"><b id="adminAverage">—</b><span>Average score / 40</span></div>
     </div>
     <section class="card live-monitor" aria-labelledby="liveMonitorTitle">
       <div class="live-monitor-heading">

@@ -26,6 +26,7 @@
   let attemptSyncRetry = 0;
   let attemptSyncRetryCount = 0;
   let latestAttempt = null;
+  let latestAttemptResult = null;
   let listenersAttached = false;
   let statusHandler = null;
   let identityHandler = null;
@@ -148,7 +149,7 @@
         const attempt = latestAttempt;
         latestAttempt = null;
         try {
-          await post(`${API}/attempts`, { quizSessionId: sessionId, attempt });
+          latestAttemptResult = await post(`${API}/attempts`, { quizSessionId: sessionId, attempt });
           attemptSyncRetryCount = 0;
           if (statusHandler) statusHandler(null);
         } catch (error) {
@@ -159,7 +160,7 @@
           return false;
         }
       }
-      return true;
+      return latestAttemptResult;
     })().finally(() => {
       attemptSyncPromise = null;
       if (latestAttempt && !attemptSyncRetry) flushAttemptSync();
@@ -380,7 +381,7 @@
   }
 
   async function finish(attempt) {
-    if (!active || !attempt) return;
+    if (!active || !attempt) return null;
     round = attempt.currentRound;
     questionNumber = Math.min(attempt.currentQuestion + 1, window.PGQuizService.roundSize(round));
     finishing = true;
@@ -388,13 +389,18 @@
     heartbeat = 0;
     if (startRetry) clearTimeout(startRetry);
     pendingAttempt = null;
-    syncAttempt(attempt);
+    const attemptSync = syncAttempt(attempt);
     await Promise.race([
       sendEvent("QUIZ_COMPLETED"),
       new Promise(resolve => window.setTimeout(() => resolve(false), 1500))
     ]);
+    const result = await attemptSync;
+    if (!result || !Array.isArray(result.review)) {
+      throw new Error("The server could not verify and score the completed quiz.");
+    }
     active = false;
     finalizeSession();
+    return result;
   }
 
   function finalizeSession() {

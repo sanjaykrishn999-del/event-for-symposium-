@@ -5,6 +5,7 @@
   const ACTIVE_KEY = "phishguard.active.attempt.v1";
   let attempt = null;
   let answerLocked = false;
+  let verifiedCompletionResult = null;
   let stopMonitoringStream = null;
   let monitoringGeneration = 0;
   let monitoringParticipants = new Map();
@@ -47,9 +48,15 @@
     setText("#contestRound", round === 3 ? "FINAL ROUND" : "ROUND " + round);
     setText("#contestNow", number);
     setText("#contestTotal", total);
-    setText("#contestProgress", (PGQuizService.overallIndex(attempt) + 1) + " / 25");
+    setText("#contestProgress", (PGQuizService.overallIndex(attempt) + 1) + " / " + attempt.totalQuestions);
     $("#contestBar").style.width = ((number - 1) / total * 100) + "%";
     $("#contestStage").innerHTML = `<p class="eyebrow">${esc(question.category.toUpperCase())} · ${esc(question.title)}</p>${renderScenario(question)}`;
+    const hint = PGQuizService.hintFor(question);
+    $("#showContestHint").hidden = !hint;
+    $("#contestHint").hidden = !hint;
+    $("#contestHint").textContent = hint ? `CLUE: ${hint}` : "";
+    $("#contestHint").classList.remove("is-visible");
+    $("#showContestHint").setAttribute("aria-expanded", "false");
     $("#contestNext").innerHTML = "";
     $("#contestLegit").disabled = false;
     $("#contestPhish").disabled = false;
@@ -85,32 +92,69 @@
     if (round === 1) {
       setText("#transitionEyebrow", "ROUND 1 COMPLETED");
       setText("#transitionTitle", "Get ready for Round 2");
-      setText("#transitionDescription", "");
+      setText("#transitionDescription", "15 intermediate questions remain.");
       setText("#startNextRound", "START ROUND 2 →");
     } else {
       setText("#transitionEyebrow", "ROUND 2 COMPLETED");
       setText("#transitionTitle", "Final Round");
-      setText("#transitionDescription", "5 questions remain.");
+      setText("#transitionDescription", "10 advanced questions remain.");
       setText("#startNextRound", "START FINAL ROUND →");
     }
     go("round-transition");
   }
 
-  function nextQuestion() {
+  function acceptCompletion(submittedAttempt, result) {
+    submittedAttempt.score = result.score;
+    submittedAttempt.roundScores = result.roundScores;
+    submittedAttempt.accuracy = result.accuracy;
+    submittedAttempt.resultReview = result.review;
+    attempt = PGParticipantService.save(submittedAttempt);
+    renderCompletionReview(attempt);
+    setText("#completedAttemptId", attempt.id);
+    sessionStorage.removeItem(ACTIVE_KEY);
+    attempt = null;
+    verifiedCompletionResult = null;
+    go("completion");
+  }
+
+  async function verifyCompletion(submittedAttempt) {
+    $("#completionRetry").hidden = true;
+    setText("#completedAttemptId", submittedAttempt.id);
+    try {
+      const result = verifiedCompletionResult || await PGMonitoringService.finish(submittedAttempt);
+      if (!result || !Array.isArray(result.review) || result.review.length + result.score !== 40) {
+        throw new Error("The server did not return a complete verified quiz result.");
+      }
+      verifiedCompletionResult = result;
+      acceptCompletion(submittedAttempt, result);
+    } catch (error) {
+      report("#completionError", "Your answers were saved, but the server could not verify the final result. Please retry without closing this page. " + error.message);
+      $("#completionRetry").hidden = false;
+      go("completion");
+    }
+  }
+
+  async function nextQuestion() {
     if (attempt.currentQuestion < PGQuizService.roundSize(attempt.currentRound)) {
       showCurrentQuestion();
     } else if (attempt.currentRound < 3) {
       openTransition(attempt.currentRound);
     } else {
-      const result = PGQuizService.score(attempt);
-      PGParticipantService.finish(attempt, result.total, result.roundScores);
-      PGMonitoringService.finish(attempt);
-      setText("#completedAttemptId", attempt.id);
-      sessionStorage.removeItem(ACTIVE_KEY);
-      attempt = null;
-      go("completion");
+      attempt = PGParticipantService.finish(attempt);
+      await verifyCompletion(attempt);
     }
   }
+
+  $("#completionRetry").addEventListener("click", async () => {
+    if (!attempt) return;
+    $("#completionRetry").disabled = true;
+    try {
+      const saved = PGParticipantService.save(attempt);
+      await verifyCompletion(saved);
+    } finally {
+      $("#completionRetry").disabled = false;
+    }
+  });
 
   function selectAnswer(choice) {
     if (!attempt || answerLocked) return;
@@ -138,6 +182,41 @@
     PGParticipantService.save(attempt);
     showCurrentQuestion();
   });
+  $("#showContestHint").addEventListener("click", () => {
+    if ($("#contestHint").hidden) return;
+    const visible = $("#contestHint").classList.toggle("is-visible");
+    $("#showContestHint").setAttribute("aria-expanded", String(visible));
+  });
+
+  function renderCompletionReview(record) {
+    const review = record.resultReview || [];
+    const scores = record.roundScores || {};
+    setText("#completionScore", `${record.score} / 40`);
+    setText("#completionRoundScores",
+      `Round 1: ${scores[1]} / 15 · Round 2: ${scores[2]} / 15 · Final Round: ${scores[3]} / 10`);
+    $("#completionError").textContent = "";
+    if (!review.length) {
+      $("#completionReview").innerHTML = `<p class="lede">Outstanding work — you answered all 40 questions correctly.</p>`;
+      return;
+    }
+    const byId = new Map(QUESTIONS.map(question => [question.id, question]));
+    $("#completionReview").innerHTML = [1, 2, 3].map(round => {
+      const items = review.filter(item => item.round === round);
+      if (!items.length) return "";
+      const title = round === 3 ? "Final Round" : `Round ${round}`;
+      return `<section class="card" style="margin-top:16px"><h3>${title} — ${items.length} to review</h3>
+        ${items.map(item => {
+          const question = byId.get(item.questionId);
+          return `<article class="card" style="margin-top:12px">
+            <p class="eyebrow">${esc(question ? question.title : item.questionId)}</p>
+            ${question ? renderScenario(question) : ""}
+            <p><b>Your answer:</b> ${esc(item.choice)}</p>
+            <p><b>Correct answer:</b> ${esc(item.correctAnswer)}</p>
+            <p>${esc(item.explanation)}</p>
+          </article>`;
+        }).join("")}</section>`;
+    }).join("");
+  }
 
   $("#participantForm").addEventListener("submit", event => {
     event.preventDefault();
@@ -260,13 +339,13 @@
       $("#participantRows").innerHTML = visible.length ? visible.map(record => {
         const p = record.participant;
         const score = scoreFor(record);
-        const accuracy = record.answers.length ? Math.round(score / 25 * 100) + "%" : "—";
+        const accuracy = record.answers.length ? Math.round(score / record.totalQuestions * 100) + "%" : "—";
         return `<tr>
           <td><button class="link-button" data-participant="${esc(record.id)}">${esc(record.id)}</button></td>
           <td>${esc(p.fullName)}</td><td>${esc(p.college)}</td>
           <td><a href="mailto:${encodeURIComponent(p.email)}">${esc(p.email)}</a></td>
           <td>${esc(p.phone)}</td><td>${esc(p.year)}</td><td>${esc(p.department)}</td>
-          <td>${score}/25</td><td>${accuracy}</td><td><span class="status ${record.status === "Completed" ? "done" : "pending"}">${esc(record.status)}</span></td>
+          <td>${score}/${record.totalQuestions}</td><td>${accuracy}</td><td><span class="status ${record.status === "Completed" ? "done" : "pending"}">${esc(record.status)}</span></td>
         </tr>`;
       }).join("") : `<tr><td colspan="10" class="empty">No participants match these filters.</td></tr>`;
       report("#adminError", "");
@@ -430,19 +509,19 @@
       const p = record.participant;
       const scores = PGQuizService.score(record).roundScores;
       const score = scoreFor(record);
-      const accuracy = record.answers.length ? Math.round(score / 25 * 100) + "%" : "—";
+      const accuracy = record.answers.length ? Math.round(score / record.totalQuestions * 100) + "%" : "—";
       const answers = new Map(record.answers.map(answer => [answer.questionId, answer]));
-      const bounds = [0, 10, 20, 25];
       const answerRows = record.questionIds.map((questionId, index) => {
         const question = QUESTIONS.find(item => item.id === questionId);
         if (!question) return "";
         const saved = answers.get(questionId);
-        const round = index < bounds[1] ? 1 : index < bounds[2] ? 2 : 3;
+        const review = record.resultReview && record.resultReview[index];
+        const round = review ? review.round : index < 15 ? 1 : index < 30 ? 2 : 3;
         const selected = saved ? saved.choice : "";
         return `<tr><td>Q${index + 1}</td><td>Round ${round === 3 ? "Final" : round}</td>
           <td>${selected ? esc(selected) : "No answer submitted"}</td>
-          <td>${esc(question.answer)}</td>
-          <td>${selected ? (selected === question.answer ? "Correct" : "Incorrect") : "—"}</td></tr>`;
+          <td>${review ? esc(review.correctAnswer) : "—"}</td>
+          <td>${review ? (review.isCorrect ? "Correct" : "Incorrect") : "—"}</td></tr>`;
       }).join("");
       detail.innerHTML = `
         <div class="admin-heading"><div><p class="eyebrow">PARTICIPANT PROFILE</p><h2>${esc(p.fullName)}</h2></div>
@@ -458,14 +537,14 @@
         <div class="profile-grid">
           <p><b>Start time</b><span>${esc(formatTime(record.startedAt))}</span></p>
           <p><b>Completion time</b><span>${esc(formatTime(record.completedAt))}</span></p>
-          <p><b>Status</b><span>${esc(record.status)}</span></p><p><b>Total questions</b><span>25</span></p>
-          <p><b>Final score</b><span>${score} / 25</span></p><p><b>Accuracy</b><span>${accuracy}</span></p>
+          <p><b>Status</b><span>${esc(record.status)}</span></p><p><b>Total questions</b><span>${record.totalQuestions}</span></p>
+          <p><b>Final score</b><span>${score} / ${record.totalQuestions}</span></p><p><b>Accuracy</b><span>${accuracy}</span></p>
         </div>
         <h3>Round performance</h3>
         <div class="grid g3 round-scores">
-          <div class="tile"><b>${scores[1]} / 10</b><span>Round 1</span></div>
-          <div class="tile"><b>${scores[2]} / 10</b><span>Round 2</span></div>
-          <div class="tile"><b>${scores[3]} / 5</b><span>Final round</span></div>
+          <div class="tile"><b>${scores[1]} / 15</b><span>Round 1</span></div>
+          <div class="tile"><b>${scores[2]} / 15</b><span>Round 2</span></div>
+          <div class="tile"><b>${scores[3]} / 10</b><span>Final round</span></div>
         </div>
         <h3>Question-wise answer review</h3>
         <p class="qmeta">Correct-answer review is visible only in the admin portal.</p>
@@ -508,7 +587,7 @@
         rows.push([record.id, record.participant.fullName, record.participant.college, record.participant.email,
           record.participant.phone, record.participant.year, record.participant.department,
           score.roundScores[1], score.roundScores[2], score.roundScores[3], score.total,
-          record.answers.length ? Math.round(score.total / 25 * 100) + "%" : "",
+          record.answers.length ? Math.round(score.total / record.totalQuestions * 100) + "%" : "",
           record.status, record.startedAt, record.completedAt || ""]);
       });
       downloadCsv("phishguard-results.csv", rows);
@@ -524,10 +603,11 @@
           const question = QUESTIONS.find(item => item.id === id);
           if (!question) return;
           const answer = answers.get(id);
-          const round = index < 10 ? "Round 1" : index < 20 ? "Round 2" : "Final Round";
+          const round = index < 15 ? "Round 1" : index < 30 ? "Round 2" : "Final Round";
           rows.push([record.id, record.participant.fullName, question.title, round,
-            answer ? answer.choice : "No answer submitted", question.answer,
-            answer ? (answer.choice === question.answer ? "Correct" : "Incorrect") : "—"]);
+            answer ? answer.choice : "No answer submitted",
+            record.resultReview?.[index]?.correctAnswer || "—",
+            record.resultReview?.[index] ? (record.resultReview[index].isCorrect ? "Correct" : "Incorrect") : "—"]);
         });
       });
       downloadCsv("phishguard-answer-review.csv", rows);

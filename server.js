@@ -7,13 +7,15 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const Database = require("better-sqlite3");
 const express = require("express");
 const session = require("express-session");
+const QUIZ_ANSWER_KEY = require("./private/quiz-answer-key.json");
 
 const ROOT = __dirname;
 const SESSION_NAME = "phishguard.sid";
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 const STALE_AFTER_MS = 45 * 1000;
 const ACTIVE_WINDOW_MS = 8 * 60 * 60 * 1000;
-const ROUND_SIZES = Object.freeze([10, 10, 5]);
+const ROUND_SIZES = Object.freeze([15, 15, 10]);
+const TOTAL_QUESTIONS = ROUND_SIZES.reduce((sum, size) => sum + size, 0);
 const ALLOWED_EVENTS = new Set([
   "TAB_HIDDEN", "WINDOW_BLUR", "RETURNED", "FULLSCREEN_EXIT",
   "QUIZ_PROGRESS", "PAGE_HIDDEN", "QUIZ_COMPLETED"
@@ -55,36 +57,60 @@ function parseRoundQuestion(body) {
 
 function normalizeAttempt(attempt, row) {
   if (!attempt || typeof attempt !== "object" || Array.isArray(attempt) ||
-      !Array.isArray(attempt.questionIds) || attempt.questionIds.length !== 25 ||
+      !Array.isArray(attempt.questionIds) || attempt.questionIds.length !== TOTAL_QUESTIONS ||
       !attempt.questionIds.every(id => isText(id, 80)) ||
-      new Set(attempt.questionIds).size !== 25 ||
-      !Array.isArray(attempt.answers) || attempt.answers.length > 25 ||
+      new Set(attempt.questionIds).size !== TOTAL_QUESTIONS ||
+      !Array.isArray(attempt.answers) || attempt.answers.length > TOTAL_QUESTIONS ||
       !Number.isInteger(attempt.currentRound) || attempt.currentRound < 1 || attempt.currentRound > 3 ||
       !Number.isInteger(attempt.currentQuestion) || attempt.currentQuestion < 0 ||
       attempt.currentQuestion > ROUND_SIZES[attempt.currentRound - 1] ||
-      attempt.totalQuestions !== 25 ||
-      !["In Progress", "Completed"].includes(attempt.status) ||
-      !attempt.roundScores || typeof attempt.roundScores !== "object" ||
-      ![1, 2, 3].every(round => Number.isInteger(attempt.roundScores[round]) &&
-        attempt.roundScores[round] >= 0 && attempt.roundScores[round] <= ROUND_SIZES[round - 1])) {
+      attempt.totalQuestions !== TOTAL_QUESTIONS ||
+      !["In Progress", "Completed"].includes(attempt.status)) {
     return null;
   }
+  const roundStarts = [0, ROUND_SIZES[0], ROUND_SIZES[0] + ROUND_SIZES[1]];
+  for (let index = 0; index < attempt.questionIds.length; index++) {
+    const question = QUIZ_ANSWER_KEY[attempt.questionIds[index]];
+    const expectedRound = index < ROUND_SIZES[0] ? 1 : index < roundStarts[2] ? 2 : 3;
+    if (!question || question.round !== expectedRound) return null;
+  }
   const answerIds = new Set();
-  for (const answer of attempt.answers) {
+  for (const [answerIndex, answer] of attempt.answers.entries()) {
     if (!answer || !attempt.questionIds.includes(answer.questionId) ||
         answerIds.has(answer.questionId) ||
+        attempt.questionIds[answerIndex] !== answer.questionId ||
         ![1, 2, 3].includes(answer.round) ||
-        !["legitimate", "phishing"].includes(answer.choice)) return null;
+        !["legitimate", "phishing"].includes(answer.choice) ||
+        QUIZ_ANSWER_KEY[answer.questionId].round !== answer.round) return null;
     answerIds.add(answer.questionId);
   }
+  const expectedAnswers = roundStarts[attempt.currentRound - 1] + attempt.currentQuestion;
+  if (attempt.answers.length !== expectedAnswers) return null;
   if (attempt.status === "Completed" &&
       (attempt.currentRound !== 3 || attempt.currentQuestion !== ROUND_SIZES[2] ||
-       attempt.answers.length !== 25 || !Number.isInteger(attempt.score) ||
-       attempt.score < 0 || attempt.score > 25 ||
-       !Number.isInteger(attempt.accuracy) || attempt.accuracy < 0 ||
-       attempt.accuracy > 100 || !isText(attempt.completedAt, 40) ||
+       attempt.answers.length !== TOTAL_QUESTIONS || !isText(attempt.completedAt, 40) ||
        Number.isNaN(Date.parse(attempt.completedAt)))) return null;
 
+  const roundScores = { 1: 0, 2: 0, 3: 0 };
+  for (const answer of attempt.answers) {
+    if (QUIZ_ANSWER_KEY[answer.questionId].answer === answer.choice) roundScores[answer.round]++;
+  }
+  const score = Object.values(roundScores).reduce((sum, value) => sum + value, 0);
+  const answersById = new Map(attempt.answers.map(answer => [answer.questionId, answer]));
+  const resultReview = attempt.status === "Completed"
+    ? attempt.questionIds.map(questionId => {
+      const key = QUIZ_ANSWER_KEY[questionId];
+      const answer = answersById.get(questionId);
+      return {
+        questionId,
+        round: key.round,
+        choice: answer.choice,
+        correctAnswer: key.answer,
+        isCorrect: answer.choice === key.answer,
+        explanation: key.explanation
+      };
+    })
+    : [];
   return {
     id: row.participant_id,
     participant: {
@@ -102,10 +128,11 @@ function normalizeAttempt(attempt, row) {
     answers: attempt.answers,
     currentRound: attempt.currentRound,
     currentQuestion: attempt.currentQuestion,
-    totalQuestions: 25,
-    roundScores: attempt.roundScores,
-    score: attempt.status === "Completed" ? attempt.score : null,
-    accuracy: attempt.status === "Completed" ? attempt.accuracy : null
+    totalQuestions: TOTAL_QUESTIONS,
+    roundScores,
+    score,
+    accuracy: attempt.status === "Completed" ? Math.round(score / TOTAL_QUESTIONS * 100) : null,
+    resultReview
   };
 }
 
@@ -385,6 +412,12 @@ function createApp(options = {}) {
     if (req.session.role !== "participant") return res.status(401).json({ error: "Quiz session is unavailable." });
     next();
   }
+  function requirePracticeSession(req, res, next) {
+    if (req.session.role === "participant") {
+      return res.status(403).json({ error: "Practice evaluation is unavailable during the symposium quiz." });
+    }
+    next();
+  }
   function saveSession(req, res, callback) {
     req.session.save(error => {
       if (error) return res.status(500).json({ error: "Could not persist the secure session." });
@@ -503,6 +536,20 @@ function createApp(options = {}) {
 
   app.get("/api/admin/session", (req, res) => {
     res.json({ authenticated: req.session.role === "admin" });
+  });
+  app.post("/api/practice/evaluate", requireSameOriginJson, requirePracticeSession, (req, res) => {
+    const { questionId, choice } = req.body;
+    const key = typeof questionId === "string" ? QUIZ_ANSWER_KEY[questionId] : null;
+    if (!key || (choice !== null && !["legitimate", "phishing"].includes(choice))) {
+      return res.status(400).json({ error: "Practice answer is invalid." });
+    }
+    res.json({
+      correct: choice === key.answer,
+      correctAnswer: key.answer,
+      explanation: key.explanation,
+      flags: key.flags,
+      tip: key.tip
+    });
   });
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", backendInstanceId });
@@ -786,7 +833,20 @@ function createApp(options = {}) {
     try {
       statements.saveAttempt.run(quizSessionId, row.participant_id, JSON.stringify(record), updatedAt);
       publishAttempt(record);
-      res.status(200).json({ participantId: row.participant_id, updatedAt });
+      const result = { participantId: row.participant_id, updatedAt };
+      if (record.status === "Completed") {
+        result.score = record.score;
+        result.roundScores = record.roundScores;
+        result.accuracy = record.accuracy;
+        result.review = record.resultReview.filter(item => !item.isCorrect).map(item => ({
+          questionId: item.questionId,
+          round: item.round,
+          choice: item.choice,
+          correctAnswer: item.correctAnswer,
+          explanation: item.explanation
+        }));
+      }
+      res.status(200).json(result);
     } catch (error) {
       next(error);
     }
@@ -801,7 +861,7 @@ function createApp(options = {}) {
     }
     if (["/server.js", "/package.json", "/package-lock.json", "/js/admin-config.js"].includes(pathname) ||
         /\.(?:sqlite|sqlite-shm|sqlite-wal)$/i.test(pathname) ||
-        ["/data", "/node_modules", "/test"].some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+        ["/data", "/node_modules", "/private", "/test"].some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
       return res.sendStatus(404);
     }
     next();

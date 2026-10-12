@@ -6,7 +6,7 @@ An educational phishing-awareness simulator built for a college cybersecurity
 symposium. Participants inspect realistic (but entirely fictional) emails, text
 messages, login pages and QR scenarios and decide whether each one is
 **legitimate** or **phishing**. The symposium quiz uses a three-round format:
-10 questions, 10 questions, then 5 questions.
+15 beginner questions, 15 intermediate questions, then 10 advanced questions.
 
 ---
 
@@ -98,9 +98,12 @@ participant and admin entry. The artwork is a custom 2D canvas interpretation,
 not a photorealistic 3D render; it uses no external assets or libraries. The
 intro can be skipped and respects reduced-motion preferences.
 
-Choose **ENTER SYMPOSIUM** to enter participant details and start the 25-question
-competition. Participant details and answers are sent to the shared server
-without correct/incorrect feedback or scores being shown to the participant.
+Choose **ENTER SYMPOSIUM** to enter participant details and start the 40-question
+competition. Round 1 includes non-revealing clues; Rounds 2 and 3 have no hints.
+The server keeps the answer key private, calculates round and total scores, and
+returns only incorrect-answer explanations after all rounds are complete.
+Participant details and answers are sent to the shared server without
+correct/incorrect feedback during the symposium rounds.
 The admin portal shows records from the centralized database, not the admin
 browser's local storage. Choose
 **ADMIN LOGIN** to review attempts, question-wise answers, and export CSV files.
@@ -141,10 +144,14 @@ monitoring records.
 
 ## What's inside
 
-**Symposium quiz** — 25 randomized scenarios selected from 30 scenarios across
-five categories (email, smishing, fake websites, quishing, AI phishing). The
-three rounds contain exactly 10, 10, and 5 questions. Scores and answers are
-only displayed in the admin portal.
+**Symposium quiz** — 40 unique scenarios across five categories (email,
+smishing, fake websites, quishing, AI phishing). The rounds contain exactly
+15 beginner, 15 intermediate, and 10 advanced questions. The server validates
+all answers and score totals; participants see only incorrect-answer feedback
+after completing all rounds, while the admin portal shows the full review. The
+answer key lives in `private/quiz-answer-key.json` for server-side scoring;
+the web server explicitly blocks it from static-file requests, so it must be
+included in server deployments but is never sent as a public asset.
 
 **🔎 Find the red flags** — a full message is shown and the participant clicks
 every suspicious part. Clicking a real clue marks it and names it; clicking
