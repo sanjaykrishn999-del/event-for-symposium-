@@ -489,9 +489,63 @@
         <p class="qmeta" id="completionRoundScores"></p>
         <p class="form-error" id="completionError" role="alert" aria-live="polite"></p>
         <div id="completionReview"></div>
+        <section class="rapid-eligibility" id="rapidEligibility" hidden>
+          <div class="rapid-scan-mark" aria-hidden="true"></div>
+          <p class="eyebrow">ELITE ASSESSMENT // SERVER VERIFIED</p>
+          <h3 id="rapidEligibilityTitle">Eligibility check complete</h3>
+          <p id="rapidEligibilityText"></p>
+          <button class="btn rapid-button" id="rapidAccessButton" type="button" hidden>VERIFY ELITE ACCESS</button>
+        </section>
         <button class="btn btn-primary" id="completionRetry" hidden>RETRY RESULT VERIFICATION</button>
       </div>
       <button class="btn btn-primary" data-go="home">RETURN TO HOME</button>
+    </div>
+  </div>
+</section>
+
+<section class="view rapid-view" id="view-rapid-access">
+  <div class="rapid-shell">
+    <div class="rapid-access-card">
+      <div class="rapid-scanner" aria-hidden="true"><i></i><b></b></div>
+      <p class="eyebrow">PHISHGUARD // RESTRICTED TIE-BREAKER</p>
+      <h2>ELITE ACCESS GRANTED</h2>
+      <p class="rapid-lede">RAPID FINAL · 95%+ QUALIFIERS ONLY</p>
+      <p id="rapidAccessDescription">Server verification is required before launch.</p>
+      <div class="rapid-access-readout">
+        <span>05 QUESTIONS</span><span>20 SECONDS EACH</span><span>NO PAUSE / NO RESET</span>
+      </div>
+      <div class="rapid-launch-count" id="rapidLaunchCount" aria-live="polite">03</div>
+      <button class="btn rapid-button" id="rapidLaunchButton" type="button" disabled>INITIALIZING SECURE SESSION</button>
+      <p class="rapid-footnote">Your timer is secured by the PhishGuard server. Refreshing will not reset it.</p>
+    </div>
+  </div>
+</section>
+
+<section class="view rapid-view" id="view-rapid-challenge">
+  <div class="rapid-shell">
+    <div class="rapid-hud">
+      <div class="rapid-hud-top">
+        <div><p class="eyebrow">PHISHGUARD // BLACK-CHANNEL ASSESSMENT</p><h2>RAPID FINAL</h2></div>
+        <div class="rapid-timer-wrap"><span>TIME LEFT</span><strong id="rapidTimer" aria-live="off">20</strong><small>SERVER LOCKED</small></div>
+      </div>
+      <div class="rapid-progress-track"><i id="rapidProgressBar"></i></div>
+      <div class="rapid-question-meta"><span id="rapidQuestionCount">QUESTION 01 / 05</span><span>ONE ATTEMPT · NO PAUSE</span></div>
+      <article class="rapid-question-panel" id="rapidQuestionPanel" aria-live="polite"></article>
+      <p class="rapid-feedback" id="rapidFeedback" role="status" aria-live="polite"></p>
+    </div>
+  </div>
+</section>
+
+<section class="view rapid-view" id="view-rapid-completion">
+  <div class="rapid-shell">
+    <div class="rapid-access-card rapid-result-card">
+      <div class="rapid-result-seal" aria-hidden="true">PG</div>
+      <p class="eyebrow">ASSESSMENT SEALED // SERVER RECORDED</p>
+      <h2>RAPID FINAL COMPLETE</h2>
+      <p class="rapid-lede" id="rapidResultStatus">Your tie-breaker attempt has been recorded.</p>
+      <p class="rapid-final-score" id="rapidFinalScore">— / 5</p>
+      <p id="rapidResultNote">Answer review is reserved for the organizer.</p>
+      <button class="btn rapid-button" type="button" data-go="home">RETURN TO PHISHGUARD</button>
     </div>
   </div>
 </section>
@@ -536,6 +590,14 @@
       <ol class="monitor-feed" id="monitorFeed"><li class="empty">No activity recorded yet.</li></ol>
     </section>
     <div class="card admin-filters">
+      <section class="rapid-admin-ranking" aria-labelledby="rapidAdminTitle">
+        <p class="eyebrow">SERVER-TIMED TIE-BREAKER</p><h3 id="rapidAdminTitle">RAPID FINAL RANKING</h3>
+        <p class="qmeta">Eligible completed attempts rank by score, then lower server-recorded response time on correct answers. Equal score and time is displayed as an explicit tie.</p>
+        <div class="table-scroll"><table class="admin-table">
+          <thead><tr><th>Rank</th><th>Participant</th><th>Main quiz</th><th>Eligibility</th><th>Rapid status</th><th>Rapid score</th><th>Correct response time</th><th>Combined / 45</th></tr></thead>
+          <tbody id="rapidRankingRows"><tr><td colspan="8" class="empty">No eligible rapid-final attempts.</td></tr></tbody>
+        </table></div>
+      </section>
       <h3>Participants</h3>
       <div class="filter-grid">
         <input id="adminSearch" type="search" placeholder="Search participants..." aria-label="Search participants">
@@ -553,7 +615,7 @@
       <p class="form-error" id="adminError" role="alert"></p>
       <div class="table-scroll">
         <table class="admin-table">
-          <thead><tr><th>ID</th><th>Name</th><th>College</th><th>Email</th><th>Phone</th><th>Year</th><th>Department</th><th>Score</th><th>Accuracy</th><th>Status</th></tr></thead>
+          <thead><tr><th>ID</th><th>Name</th><th>College</th><th>Email</th><th>Phone</th><th>Year</th><th>Department</th><th>Score</th><th>Accuracy</th><th>Rapid Final</th><th>Status</th></tr></thead>
           <tbody id="participantRows"></tbody>
         </table>
       </div>

@@ -1,6 +1,6 @@
 /* PhishGuard offline cache. Only active when the site is served over http(s);
    opening index.html directly from the file system already works offline. */
-const CACHE = 'phishguard-v17';
+const CACHE = 'phishguard-v18';
 const ASSETS = [
   './', './index.html', './css/styles.css',
   './js/data.js', './js/data-service.js',

@@ -1,0 +1,67 @@
+[
+  {
+    "id": "rf1",
+    "title": "Payroll chain-of-trust failure",
+    "scenario": "A payroll message arrives from an executive's real, compromised mailbox and references a genuine pending salary correction. The visible From and Reply-To both use the institute domain. The receiving gateway reports SPF=pass, DKIM=pass, and DMARC=pass. The message asks you to review a revised bank-account spreadsheet hosted in the institute's real collaboration tenant. The file was created minutes ago by a newly invited external guest, and its audit history shows that the executive's account granted that guest access from an unfamiliar country. What is the safest next action?",
+    "options": [
+      "Treat the message as trusted because all three email authentication checks pass and the sender domain is genuine.",
+      "Open the spreadsheet in a private browser window, inspect its contents, and report it only if it contains a macro.",
+      "Do not use the message or file; independently contact payroll through a known channel and ask security to investigate the compromised account and guest-sharing audit trail.",
+      "Reply to the executive's genuine address asking them to confirm, then proceed if they respond."
+    ],
+    "answer": 2,
+    "explanation": "SPF, DKIM, and DMARC authenticate domain alignment, not the human operator or the safety of a compromised mailbox. The external guest invitation and anomalous sharing audit are independent indicators of account compromise. Verify out of band and preserve the evidence for incident response."
+  },
+  {
+    "id": "rf2",
+    "title": "The tenant hidden in the URL",
+    "scenario": "An unexpected document notice links to https://login.microsoftonline.com.common-auth-login.com/organizations/oauth2/v2.0/authorize?client_id=... . The browser shows a valid HTTPS padlock, and the page asks the user to sign in to the institute tenant. Which interpretation is technically correct?",
+    "options": [
+      "The request is on Microsoft's login domain because login.microsoftonline.com appears at the beginning of the hostname.",
+      "The registrable domain is common-auth-login.com; login.microsoftonline.com is only a subdomain, so the HTTPS certificate secures a connection to the attacker-controlled domain, not Microsoft's service.",
+      "The OAuth path guarantees that Microsoft will validate the client before credentials are entered.",
+      "Because the link uses HTTPS and an OAuth authorize path, it is safe unless the certificate is expired."
+    ],
+    "answer": 1,
+    "explanation": "Read the hostname from right to left: common-auth.example is the registrable domain, and the Microsoft-looking text is a subdomain. HTTPS authenticates that hostname and encrypts traffic to it; it does not make the hostname Microsoft-owned or validate a phishing page."
+  },
+  {
+    "id": "rf3",
+    "title": "The verified supplier's urgent bank change",
+    "scenario": "A known supplier's established email thread asks you to replace its bank account before today's invoice run. The sender address, DKIM signature, and historical thread all check out. The supplier's accounts contact says they are in transit and asks you to keep the change confidential. A phone number in the message reaches someone who knows the invoice amount and purchase-order number. What action best controls the risk?",
+    "options": [
+      "Call the number in the message and approve the change if the person can repeat the purchase-order number.",
+      "Make a small test transfer to the new account and proceed if it arrives.",
+      "Pause the payment and verify the change using a previously recorded supplier contact and the established dual-approval process; alert finance/security about possible mailbox compromise.",
+      "Approve the change because a valid DKIM signature proves the supplier authored the request."
+    ],
+    "answer": 2,
+    "explanation": "A genuine supplier mailbox and accurate invoice details can still be compromised. The new number is attacker-supplied, knowledge of transaction data is not identity proof, and secrecy/urgency are social-engineering signals. Use the existing independent contact record and dual control."
+  },
+  {
+    "id": "rf4",
+    "title": "MFA fatigue followed by a support call",
+    "scenario": "A user denies six unexpected push prompts. A caller then claims to be incident response, correctly states the user's device model, and asks them to approve one final prompt so the team can identify the attacker. The identity-provider log later shows a successful sign-in from a new ASN using a valid password and a push approval, followed by creation of an OAuth app consent. What is the best immediate response?",
+    "options": [
+      "Approve the next push while on the call, then change the password after the support agent confirms the login.",
+      "Treat the approval as account compromise: end the call, contact security using a known channel, revoke sessions and suspicious OAuth consent, reset credentials from a trusted device, and investigate the sign-in.",
+      "Change the password only; valid MFA means the OAuth app is trusted.",
+      "Block the new ASN at the user's device firewall and keep the current identity-provider sessions active."
+    ],
+    "answer": 1,
+    "explanation": "The sequence indicates successful MFA fatigue/social engineering and post-authentication persistence through OAuth consent. Device details are not proof of caller identity. Contain sessions and consent grants, reset credentials via a trusted channel, and investigate before restoring access."
+  },
+  {
+    "id": "rf5",
+    "title": "QR redirect and delegated sign-in",
+    "scenario": "A QR code on a symposium poster opens https://events.vidyanagar-institute.edu@claim-prize.example/authorize?redirect_uri=https%3A%2F%2Fevents.vidyanagar-institute.edu%2Fcallback . The page displays the institute logo and offers “Continue with Campus SSO.” What is the safest technical assessment?",
+    "options": [
+      "The URL is hosted by the institute because the institute hostname appears before the @ symbol and again in the redirect_uri.",
+      "The actual host is claim-prize.example; the text before @ is user-info, and a supplied redirect_uri does not prove that an OAuth client or callback is trustworthy. Do not sign in; report the QR and verify the event through the official site.",
+      "The encoded redirect_uri guarantees that credentials are returned only to the institute callback.",
+      "Scan it again with a different camera app; if the URL is unchanged, the QR code is authentic."
+    ],
+    "answer": 1,
+    "explanation": "In URL authority syntax, user-info precedes @ and the host follows it, making claim-prize.example the destination. A redirect_uri query parameter is merely a claim; it is not proof that the authorization server will enforce a registered callback. The QR's appearance and repeated scan do not establish provenance."
+  }
+]

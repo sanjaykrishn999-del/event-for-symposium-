@@ -153,6 +153,14 @@ answer key lives in `private/quiz-answer-key.json` for server-side scoring;
 the web server explicitly blocks it from static-file requests, so it must be
 included in server deployments but is never sent as a public asset.
 
+**RAPID FINAL** — a separate five-question, four-option tie-breaker for
+participants whose server-verified main score is at least 95% (38/40).
+Each question has a server-enforced 20-second deadline that survives refreshes;
+timeouts score zero, and answers are revealed only in the authenticated admin
+portal. The five scenarios and answer key live in the blocked `private/`
+directory. Ranking is by RAPID FINAL score, then total server-recorded response
+time for correct answers; exact ties share a rank.
+
 **🔎 Find the red flags** — a full message is shown and the participant clicks
 every suspicious part. Clicking a real clue marks it and names it; clicking
 something harmless explains why it's normal.

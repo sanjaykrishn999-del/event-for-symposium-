@@ -7,8 +7,9 @@ const os = require("node:os");
 const path = require("node:path");
 const vm = require("node:vm");
 const { after, before, test } = require("node:test");
-const { createApp } = require("../server");
+const { createApp, rapidFinalEligible, rankRapidFinal } = require("../server");
 const answerKey = require("../private/quiz-answer-key.json");
+const rapidFinalQuestions = require("../private/rapid-final-questions.json");
 const questionIds = Object.keys(answerKey).sort((left, right) =>
   answerKey[left].round - answerKey[right].round || left.localeCompare(right));
 
@@ -16,12 +17,14 @@ const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "phishguard-monitor-
 const testPassword = "a-long-test-password";
 const testSalt = Buffer.from("00112233445566778899aabbccddeeff", "hex");
 const testPasswordHash = `scrypt$${testSalt.toString("hex")}$${crypto.scryptSync(testPassword, testSalt, 64).toString("hex")}`;
+let rapidNow = Date.now();
 const runtime = createApp({
   adminId: "test-organizer",
   adminPasswordHash: testPasswordHash,
   sessionSecret: "test-session-secret-that-is-long-enough",
   trustProxy: 1,
-  dbPath: path.join(tempDirectory, "monitor.sqlite")
+  dbPath: path.join(tempDirectory, "monitor.sqlite"),
+  rapidFinalClock: () => rapidNow
 });
 let server;
 let baseUrl;
@@ -85,6 +88,56 @@ function participantAttempt(name = "Test Participant") {
     roundScores: { 1: 0, 2: 0, 3: 0 },
     score: null,
     accuracy: null
+  };
+}
+
+async function completedParticipant(name, score) {
+  const started = await jsonRequest("/api/monitor/sessions", {
+    method: "POST",
+    body: {
+      startRequestId: crypto.randomUUID(),
+      participant: {
+        fullName: name,
+        college: "Example College",
+        email: `${crypto.randomUUID()}@example.test`,
+        department: "Security",
+        year: "I Year"
+      },
+      round: 1,
+      questionNumber: 1
+    }
+  });
+  assert.equal(started.response.status, 201);
+  const answers = questionIds.map((questionId, index) => {
+    const correct = answerKey[questionId].answer;
+    const choice = index < score ? correct : correct === "phishing" ? "legitimate" : "phishing";
+    return { questionId, round: answerKey[questionId].round, choice };
+  });
+  const completedAt = new Date().toISOString();
+  const completed = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie: cookieFrom(started.response),
+    body: {
+      quizSessionId: started.result.quizSessionId,
+      attempt: {
+        ...participantAttempt(name),
+        id: started.result.participantId,
+        questionIds,
+        answers,
+        currentRound: 3,
+        currentQuestion: 10,
+        status: "Completed",
+        completedAt
+      }
+    }
+  });
+  assert.equal(completed.response.status, 200);
+  assert.equal(completed.result.score, score);
+  return {
+    cookie: cookieFrom(started.response),
+    quizSessionId: started.result.quizSessionId,
+    participantId: started.result.participantId,
+    completedAt
   };
 }
 
@@ -381,6 +434,212 @@ test("a perfect 40/40 quiz completes with no incorrect-answer review", async () 
   assert.deepEqual(result.result.review, []);
 });
 
+test("RAPID FINAL eligibility is server-calculated at the exact 95 percent threshold", async () => {
+  assert.equal(rapidFinalEligible({ status: "Completed", totalQuestions: 40, score: 38 }), true);
+  assert.equal(rapidFinalEligible({ status: "Completed", totalQuestions: 40, score: 37 }), false);
+  const qualifier = await completedParticipant("Ninety Five Percent", 38);
+  const status = await jsonRequest("/api/rapid-final/status", { cookie: qualifier.cookie });
+  assert.equal(status.response.status, 200);
+  assert.equal(status.result.eligible, true);
+  assert.equal(status.result.mainPercentage, 95);
+  assert.equal(status.result.mainScore, 38);
+  assert.deepEqual(status.result.mainRoundScores, { 1: 15, 2: 15, 3: 8 });
+  assert.equal(status.result.mainReview.length, 2);
+  assert.equal(status.result.mainReview.some(item => Object.hasOwn(item, "isCorrect")), false);
+  assert.equal(status.result.status, "available");
+  const belowThreshold = await completedParticipant("Below Qualification", 37);
+  const belowStatus = await jsonRequest("/api/rapid-final/status", { cookie: belowThreshold.cookie });
+  assert.equal(belowStatus.response.status, 200);
+  assert.equal(belowStatus.result.eligible, false);
+  assert.equal(belowStatus.result.mainPercentage, 92.5);
+  const blockedStart = await jsonRequest("/api/rapid-final/start", {
+    method: "POST", cookie: belowThreshold.cookie, body: {}
+  });
+  assert.equal(blockedStart.response.status, 403);
+  const blockedState = await jsonRequest("/api/rapid-final/state", { cookie: belowThreshold.cookie });
+  assert.equal(blockedState.response.status, 403);
+  const forgedClientScore = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie: belowThreshold.cookie,
+    body: {
+      quizSessionId: belowThreshold.quizSessionId,
+      attempt: {
+        ...participantAttempt("Below Qualification"),
+        id: belowThreshold.participantId,
+        questionIds,
+        answers: questionIds.map((questionId, index) => ({
+          questionId,
+          round: answerKey[questionId].round,
+          choice: index < 37
+            ? answerKey[questionId].answer
+            : answerKey[questionId].answer === "phishing" ? "legitimate" : "phishing"
+        })),
+        currentRound: 3,
+        currentQuestion: 10,
+        status: "Completed",
+        completedAt: belowThreshold.completedAt,
+        score: 40,
+        accuracy: 100
+      }
+    }
+  });
+  assert.equal(forgedClientScore.response.status, 200);
+  assert.equal(forgedClientScore.result.score, 37);
+  assert.equal(forgedClientScore.result.rapidFinalEligible, false);
+});
+
+test("RAPID FINAL serves five secret timed questions and records an admin-only result", async () => {
+  const participant = await completedParticipant("Rapid Final Qualifier", 40);
+  const started = await jsonRequest("/api/rapid-final/start", {
+    method: "POST", cookie: participant.cookie, body: {}
+  });
+  assert.equal(started.response.status, 200);
+  assert.equal(started.result.status, "in_progress");
+  assert.equal(started.result.questionCount, 5);
+  assert.equal(started.result.secondsPerQuestion, 20);
+  assert.equal(started.result.deadlineAt - started.result.questionStartedAt, 20000);
+  assert.equal(started.result.question.options.length, 4);
+  assert.equal(Object.hasOwn(started.result.question, "answer"), false);
+  assert.equal(Object.hasOwn(started.result.question, "explanation"), false);
+  assert.equal(Object.hasOwn(started.result, "score"), false);
+  assert.equal(rapidFinalQuestions.length, 5);
+  assert.equal(new Set(rapidFinalQuestions.map(question => question.id)).size, 5);
+  for (const question of rapidFinalQuestions) {
+    assert.equal(question.options.length, 4);
+    assert.ok(Number.isInteger(question.answer) && question.answer >= 0 && question.answer < 4);
+    assert.ok(question.explanation.length > 20);
+  }
+
+  let state = started.result;
+  for (let index = 0; index < 5; index++) {
+    assert.equal(state.questionIndex, index);
+    const requestId = crypto.randomUUID();
+    const submission = await jsonRequest("/api/rapid-final/answer", {
+      method: "POST",
+      cookie: participant.cookie,
+      body: {
+        questionIndex: index,
+        choiceIndex: rapidFinalQuestions[index].answer,
+        requestId
+      }
+    });
+    assert.equal(submission.response.status, 200);
+    state = submission.result;
+    assert.equal(Object.hasOwn(state, "answers"), false);
+    assert.equal(Object.hasOwn(state, "correctAnswer"), false);
+    assert.equal(Object.hasOwn(state, "isCorrect"), false);
+    if (index < 4) assert.equal(Object.hasOwn(state, "score"), false);
+    if (index === 0) {
+      const duplicate = await jsonRequest("/api/rapid-final/answer", {
+        method: "POST",
+        cookie: participant.cookie,
+        body: { questionIndex: index, choiceIndex: 0, requestId }
+      });
+      assert.equal(duplicate.response.status, 200);
+      assert.equal(duplicate.result.questionIndex, 1);
+    }
+  }
+  assert.equal(state.status, "completed");
+  assert.equal(state.score, 5);
+  const replay = await jsonRequest("/api/rapid-final/answer", {
+    method: "POST",
+    cookie: participant.cookie,
+    body: { questionIndex: 4, choiceIndex: 0, requestId: crypto.randomUUID() }
+  });
+  assert.equal(replay.response.status, 200);
+  assert.equal(replay.result.score, 5);
+  const reentered = await jsonRequest("/api/rapid-final/start", {
+    method: "POST", cookie: participant.cookie, body: {}
+  });
+  assert.equal(reentered.result.status, "completed");
+  assert.equal(reentered.result.score, 5);
+  const participantAdminData = await jsonRequest("/api/admin/monitor/snapshot", {
+    cookie: participant.cookie
+  });
+  assert.equal(participantAdminData.response.status, 401);
+  const snapshot = await jsonRequest("/api/admin/monitor/snapshot", { cookie: adminCookie });
+  const record = snapshot.result.attempts.find(item => item.id === participant.participantId);
+  assert.equal(record.rapidFinal.eligible, true);
+  assert.equal(record.rapidFinal.score, 5);
+  assert.equal(record.rapidFinal.answers.length, 5);
+  assert.equal(record.rapidFinal.answers[0].correctAnswer, rapidFinalQuestions[0].answer);
+  assert.equal(record.rapidFinal.answers[0].isCorrect, true);
+  assert.ok(Number.isFinite(record.rapidFinal.answers[0].submittedAt));
+  assert.equal(record.rapidFinal.unansweredCount, 0);
+  assert.equal(record.rapidFinal.ranking, 1);
+});
+
+test("RAPID FINAL timeout advances from server time and scores unanswered as zero", async () => {
+  const participant = await completedParticipant("Rapid Timeout Qualifier", 39);
+  const started = await jsonRequest("/api/rapid-final/start", {
+    method: "POST", cookie: participant.cookie, body: {}
+  });
+  assert.equal(started.response.status, 200);
+  rapidNow = started.result.deadlineAt + 1;
+  const afterExpiry = await jsonRequest("/api/rapid-final/answer", {
+    method: "POST",
+    cookie: participant.cookie,
+    body: {
+      questionIndex: 0,
+      choiceIndex: rapidFinalQuestions[0].answer,
+      requestId: crypto.randomUUID()
+    }
+  });
+  assert.equal(afterExpiry.response.status, 409);
+  assert.equal(afterExpiry.result.state.questionIndex, 1);
+  assert.equal(afterExpiry.result.state.question.id, rapidFinalQuestions[1].id);
+  let state = afterExpiry.result.state;
+  for (let index = 1; index < 5; index++) {
+    const next = await jsonRequest("/api/rapid-final/answer", {
+      method: "POST",
+      cookie: participant.cookie,
+      body: {
+        questionIndex: index,
+        choiceIndex: rapidFinalQuestions[index].answer,
+        requestId: crypto.randomUUID()
+      }
+    });
+    assert.equal(next.response.status, 200);
+    state = next.result;
+  }
+  assert.equal(state.status, "completed");
+  assert.equal(state.score, 4);
+  const snapshot = await jsonRequest("/api/admin/monitor/snapshot", { cookie: adminCookie });
+  const record = snapshot.result.attempts.find(item => item.id === participant.participantId);
+  assert.equal(record.rapidFinal.unansweredCount, 1);
+  assert.equal(record.rapidFinal.answers[0].choiceIndex, null);
+  assert.equal(record.rapidFinal.answers[0].isCorrect, false);
+  assert.equal(record.rapidFinal.answers[0].responseTimeMs, 20000);
+});
+
+test("RAPID FINAL ranking uses score, correct response time, and explicit ties", () => {
+  const makeRecord = (id, score, responseTime) => ({
+    id,
+    rapidFinal: {
+      eligible: true,
+      status: "completed",
+      score,
+      totalCorrectResponseMs: responseTime,
+      ranking: null,
+      isTied: false
+    }
+  });
+  const ranked = rankRapidFinal([
+    makeRecord("tie-a", 5, 900),
+    makeRecord("tie-b", 5, 900),
+    makeRecord("slower-five", 5, 600),
+    makeRecord("fastest-five", 5, 500),
+    makeRecord("faster-lower", 4, 100)
+  ]);
+  assert.deepEqual(ranked.map(record => [record.id, record.rapidFinal.ranking, record.rapidFinal.isTied]), [
+    ["tie-a", 3, true],
+    ["tie-b", 3, true],
+    ["slower-five", 2, false],
+    ["fastest-five", 1, false],
+    ["faster-lower", 5, false]
+  ]);
+});
+
 test("admin event stream publishes independent participant sessions and updated progress", async t => {
   const response = await fetch(`${baseUrl}/api/admin/monitor/stream`, {
     headers: { Cookie: adminCookie }
@@ -498,8 +757,11 @@ test("admin event stream publishes independent participant sessions and updated 
   assert.equal(retriedStart.result.quizSessionId, mobileStart.result.quizSessionId);
   assert.equal(retriedStart.result.participantId, mobileStart.result.participantId);
   const snapshot = await jsonRequest("/api/admin/monitor/snapshot", { cookie: adminCookie });
-  assert.equal(snapshot.result.participants.length, 11);
-  assert.equal(snapshot.result.attempts.length, 11);
+  assert.ok(snapshot.result.participants.length >= 11);
+  assert.ok(snapshot.result.attempts.length >= 11);
+  for (let index = 1; index <= 8; index++) {
+    assert.ok(snapshot.result.participants.some(person => person.participantName === `Global Participant ${index}`));
+  }
 
   await reader.cancel();
   const reconnected = await fetch(`${baseUrl}/api/admin/monitor/stream`, {
@@ -517,14 +779,15 @@ test("admin event stream publishes independent participant sessions and updated 
     body: {},
     cookie: adminCookie
   });
-  assert.equal((await closed).done, true);
+  let closedState = await closed;
+  while (!closedState.done) closedState = await reconnectedReader.read();
   await reconnectedReader.cancel();
 });
 
 test("private monitoring database and server configuration are not static assets", async () => {
   for (const asset of [
     "/server.js", "/package.json", "/data/monitor.sqlite",
-    "/private/quiz-answer-key.json", "/js/admin-config.js"
+    "/private/quiz-answer-key.json", "/private/rapid-final-questions.json", "/js/admin-config.js"
   ]) {
     const response = await fetch(`${baseUrl}${asset}`);
     assert.equal(response.status, 404, `${asset} should not be publicly served`);

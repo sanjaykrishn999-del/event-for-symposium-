@@ -3,6 +3,9 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const ACTIVE_KEY = "phishguard.active.attempt.v1";
+  const MAIN_COMPLETION_KEY = "phishguard.main-completed.v1";
+  const RAPID_FINAL_KEY = "phishguard.rapid-final.active.v1";
+  const RAPID_FINAL_API = "/api/rapid-final";
   let attempt = null;
   let answerLocked = false;
   let verifiedCompletionResult = null;
@@ -11,6 +14,13 @@
   let monitoringParticipants = new Map();
   let monitoringEvents = [];
   let centralAttempts = new Map();
+  let rapidAuthorized = false;
+  let rapidTimerId = 0;
+  let rapidRetryTimer = 0;
+  let rapidDeadlineMono = 0;
+  let rapidQuestionIndex = -1;
+  let rapidPendingSubmission = null;
+  let rapidCountdownTimer = 0;
 
   function esc(value) {
     return String(value == null ? "" : value).replace(/[&<>"]/g, char =>
@@ -18,6 +28,7 @@
   }
   function setText(selector, value) { $(selector).textContent = value; }
   function report(selector, message) { setText(selector, message); }
+  window.PGPortalCanOpenRapidFinal = () => rapidAuthorized;
   function formatTime(value) {
     if (!value) return "—";
     const date = new Date(value);
@@ -110,8 +121,10 @@
     submittedAttempt.resultReview = result.review;
     attempt = PGParticipantService.save(submittedAttempt);
     renderCompletionReview(attempt);
+    renderRapidEligibility(result);
     setText("#completedAttemptId", attempt.id);
     sessionStorage.removeItem(ACTIVE_KEY);
+    sessionStorage.setItem(MAIN_COMPLETION_KEY, "1");
     attempt = null;
     verifiedCompletionResult = null;
     go("completion");
@@ -122,7 +135,9 @@
     setText("#completedAttemptId", submittedAttempt.id);
     try {
       const result = verifiedCompletionResult || await PGMonitoringService.finish(submittedAttempt);
-      if (!result || !Array.isArray(result.review) || result.review.length + result.score !== 40) {
+      if (!result || !Array.isArray(result.review) || result.review.length + result.score !== 40 ||
+          typeof result.rapidFinalEligible !== "boolean" ||
+          !Number.isFinite(result.mainPercentage)) {
         throw new Error("The server did not return a complete verified quiz result.");
       }
       verifiedCompletionResult = result;
@@ -187,6 +202,72 @@
     const visible = $("#contestHint").classList.toggle("is-visible");
     $("#showContestHint").setAttribute("aria-expanded", String(visible));
   });
+  $("#rapidAccessButton").addEventListener("click", async () => {
+    const button = $("#rapidAccessButton");
+    button.disabled = true;
+    try {
+      const status = await rapidRequest("/status");
+      if (!status.eligible) {
+        renderRapidEligibility({
+          rapidFinalEligible: false,
+          mainPercentage: status.mainPercentage
+        });
+        return;
+      }
+      rapidAuthorized = true;
+      if (status.status === "in_progress" || status.status === "completed") {
+        const state = await rapidRequest("/state");
+        reconcileRapidResponse(state);
+        return;
+      }
+      setText("#rapidAccessDescription",
+        `Main assessment verified at ${status.mainPercentage.toFixed(1)}%. The launch delay is active; no challenge time runs until server launch.`);
+      setText("#rapidLaunchCount", "03");
+      $("#rapidLaunchButton").disabled = true;
+      $("#rapidLaunchButton").textContent = "INITIALIZING SECURE SESSION";
+      go("rapid-access");
+      if (rapidCountdownTimer) window.clearInterval(rapidCountdownTimer);
+      let count = 3;
+      rapidCountdownTimer = window.setInterval(() => {
+        count--;
+        setText("#rapidLaunchCount", String(Math.max(0, count)).padStart(2, "0"));
+        if (count <= 0) {
+          window.clearInterval(rapidCountdownTimer);
+          rapidCountdownTimer = 0;
+          $("#rapidLaunchButton").disabled = false;
+          $("#rapidLaunchButton").textContent = "ENTER RAPID FINAL";
+        }
+      }, 1000);
+    } catch (error) {
+      report("#rapidEligibilityText", `Eligibility could not be verified by the server: ${error.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $("#rapidLaunchButton").addEventListener("click", async () => {
+    const button = $("#rapidLaunchButton");
+    button.disabled = true;
+    button.textContent = "OPENING SECURE CHANNEL…";
+    try {
+      const state = await rapidRequest("/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+      });
+      rapidAuthorized = true;
+      sessionStorage.setItem(RAPID_FINAL_KEY, "1");
+      reconcileRapidResponse(state);
+    } catch (error) {
+      setText("#rapidAccessDescription",
+        `Secure launch could not be confirmed: ${error.message}. Retry safely; if the request reached the server, its timer will not reset.`);
+      button.disabled = false;
+      button.textContent = "RETRY SECURE LAUNCH";
+    }
+  });
+  $("#rapidQuestionPanel").addEventListener("click", event => {
+    const option = event.target.closest("[data-rapid-choice]");
+    if (option && !option.disabled) submitRapidAnswer(Number(option.dataset.rapidChoice));
+  });
 
   function renderCompletionReview(record) {
     const review = record.resultReview || [];
@@ -199,6 +280,7 @@
       $("#completionReview").innerHTML = `<p class="lede">Outstanding work — you answered all 40 questions correctly.</p>`;
       return;
     }
+
     const byId = new Map(QUESTIONS.map(question => [question.id, question]));
     $("#completionReview").innerHTML = [1, 2, 3].map(round => {
       const items = review.filter(item => item.round === round);
@@ -216,6 +298,199 @@
           </article>`;
         }).join("")}</section>`;
     }).join("");
+  }
+
+  function renderRapidEligibility(result) {
+    const panel = $("#rapidEligibility");
+    panel.hidden = false;
+    const percent = Number(result.mainPercentage);
+    const eligible = result.rapidFinalEligible === true && percent >= 95;
+    rapidAuthorized = eligible;
+    setText("#rapidEligibilityTitle", eligible ? "ELITE ACCESS VERIFIED" : "ASSESSMENT COMPLETE");
+    setText("#rapidEligibilityText", eligible
+      ? `Your server-verified main score is ${percent.toFixed(1)}%. You qualify for RAPID FINAL, a separate five-question tie-breaker.`
+      : `Your server-verified main score is ${Number.isFinite(percent) ? percent.toFixed(1) : "—"}%. RAPID FINAL requires at least 95%; your main-quiz result remains recorded.`);
+    $("#rapidAccessButton").hidden = !eligible;
+  }
+
+  function restoreMainCompletion(status) {
+    renderCompletionReview({
+      score: status.mainScore,
+      roundScores: status.mainRoundScores,
+      resultReview: status.mainReview
+    });
+    setText("#completedAttemptId", status.participantId);
+    renderRapidEligibility({
+      rapidFinalEligible: status.eligible,
+      mainPercentage: status.mainPercentage
+    });
+    go("completion");
+  }
+
+  async function rapidRequest(path, options = {}) {
+    const response = await fetch(`${RAPID_FINAL_API}${path}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...options
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      const error = new Error(result.error || "RAPID FINAL could not be reached.");
+      error.status = response.status;
+      error.result = result;
+      throw error;
+    }
+    return result;
+  }
+
+  function stopRapidTimer() {
+    if (rapidTimerId) window.clearInterval(rapidTimerId);
+    rapidTimerId = 0;
+  }
+
+  function showRapidCompletion(state) {
+    stopRapidTimer();
+    if (rapidRetryTimer) window.clearTimeout(rapidRetryTimer);
+    rapidRetryTimer = 0;
+    rapidPendingSubmission = null;
+    sessionStorage.setItem(RAPID_FINAL_KEY, "1");
+    setText("#rapidFinalScore", `${state.score} / 5`);
+    setText("#rapidResultStatus", "Five-question tie-breaker submitted and sealed.");
+    setText("#rapidResultNote", "Correct answers and response-time analysis are available only to the authenticated organizer.");
+    go("rapid-completion");
+  }
+
+  function renderRapidQuestion(state) {
+    if (!state || state.status !== "in_progress" || !state.question) {
+      if (state && state.status === "completed") showRapidCompletion(state);
+      else report("#rapidFeedback", "The secure challenge state is unavailable. Reconnect to resume your server-timed attempt.");
+      return;
+    }
+    rapidAuthorized = true;
+    sessionStorage.setItem(RAPID_FINAL_KEY, "1");
+    stopRapidTimer();
+    if (rapidRetryTimer) window.clearTimeout(rapidRetryTimer);
+    rapidRetryTimer = 0;
+    rapidPendingSubmission = null;
+    rapidQuestionIndex = state.questionIndex;
+    $("#rapidQuestionCount").textContent =
+      `QUESTION ${String(state.questionIndex + 1).padStart(2, "0")} / 05`;
+    $("#rapidProgressBar").style.width = `${state.questionIndex / 5 * 100}%`;
+    $("#rapidFeedback").textContent = "";
+    $("#rapidQuestionPanel").innerHTML = `
+      <h3>${esc(state.question.title)}</h3>
+      <div class="rapid-scenario">${esc(state.question.scenario)}</div>
+      <div class="rapid-options" role="group" aria-label="Choose one response">
+        ${state.question.options.map((option, index) => `
+          <button class="rapid-option" type="button" data-rapid-choice="${index}">
+            <b>${String.fromCharCode(65 + index)}</b><span>${esc(option)}</span>
+          </button>`).join("")}
+      </div>`;
+    const leftMs = Math.max(0, state.deadlineAt - state.serverNow);
+    rapidDeadlineMono = performance.now() + leftMs;
+    const timer = $("#rapidTimer");
+    const tick = () => {
+      const remaining = Math.max(0, rapidDeadlineMono - performance.now());
+      const seconds = Math.ceil(remaining / 1000);
+      timer.textContent = String(seconds).padStart(2, "0");
+      timer.classList.toggle("low", seconds <= 10 && seconds > 5);
+      timer.classList.toggle("critical", seconds <= 5);
+      if (remaining <= 0) submitRapidAnswer(null);
+    };
+    tick();
+    rapidTimerId = window.setInterval(tick, 100);
+    go("rapid-challenge");
+  }
+
+  function reconcileRapidResponse(state) {
+    if (state.status === "completed") showRapidCompletion(state);
+    else if (state.status === "in_progress") renderRapidQuestion(state);
+    else report("#rapidFeedback", "The server did not return an active RAPID FINAL question.");
+  }
+
+  async function sendRapidSubmission() {
+    if (!rapidPendingSubmission) return;
+    try {
+      const response = await fetch(`${RAPID_FINAL_API}/answer`, {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rapidPendingSubmission)
+      });
+      const result = await response.json();
+      if (response.status === 409 && result.state) {
+        reconcileRapidResponse(result.state);
+        return;
+      }
+      if (!response.ok) {
+        const error = new Error(result.error || "Answer submission failed.");
+        error.status = response.status;
+        throw error;
+      }
+      reconcileRapidResponse(result);
+    } catch (error) {
+      if ([400, 401, 403, 404].includes(error.status)) {
+        report("#rapidFeedback", `Secure submission stopped: ${error.message}`);
+        if (error.status === 403 || error.status === 404) sessionStorage.removeItem(RAPID_FINAL_KEY);
+        return;
+      }
+      report("#rapidFeedback", "Connection interrupted; the server timer continues. Reconnecting to the same question…");
+      rapidRetryTimer = window.setTimeout(sendRapidSubmission, 1200);
+    }
+  }
+
+  function submitRapidAnswer(choiceIndex) {
+    if (rapidPendingSubmission || rapidQuestionIndex < 0) return;
+    stopRapidTimer();
+    $("#rapidQuestionPanel").querySelectorAll("[data-rapid-choice]")
+      .forEach(button => { button.disabled = true; });
+    report("#rapidFeedback", choiceIndex === null
+      ? "TIME EXPIRED // ANSWER RECORDED AS UNANSWERED"
+      : "RESPONSE SEALED // VERIFYING WITH SERVER");
+    rapidPendingSubmission = {
+      questionIndex: rapidQuestionIndex,
+      choiceIndex,
+      requestId: crypto.randomUUID()
+    };
+    sendRapidSubmission();
+  }
+
+  async function resumeRapidFinal() {
+    const rapidSessionExists = sessionStorage.getItem(RAPID_FINAL_KEY) === "1";
+    const mainCompletionExists = sessionStorage.getItem(MAIN_COMPLETION_KEY) === "1";
+    if (!rapidSessionExists && !mainCompletionExists) return;
+    try {
+      const status = await rapidRequest("/status");
+      if (!status.eligible) {
+        sessionStorage.removeItem(RAPID_FINAL_KEY);
+        if (mainCompletionExists) restoreMainCompletion(status);
+        return;
+      }
+      rapidAuthorized = true;
+      if (mainCompletionExists) restoreMainCompletion(status);
+      if (status.status === "in_progress" || status.status === "completed") {
+        sessionStorage.setItem(RAPID_FINAL_KEY, "1");
+        const state = await rapidRequest("/state");
+        reconcileRapidResponse(state);
+      } else if (mainCompletionExists) {
+        go("completion");
+      }
+    } catch (error) {
+      if (error.status === 401 || error.status === 403 || error.status === 404) {
+        sessionStorage.removeItem(RAPID_FINAL_KEY);
+        sessionStorage.removeItem(MAIN_COMPLETION_KEY);
+        return;
+      }
+      if (rapidSessionExists) {
+        report("#rapidFeedback", "Restoring your secure RAPID FINAL session…");
+        go("rapid-challenge");
+      } else {
+        report("#completionError", "Your verified results are safe. Eligibility could not be refreshed; reconnect to retry. " + error.message);
+        go("completion");
+      }
+      rapidRetryTimer = window.setTimeout(resumeRapidFinal, 1500);
+    }
   }
 
   $("#participantForm").addEventListener("submit", event => {
@@ -340,17 +615,39 @@
         const p = record.participant;
         const score = scoreFor(record);
         const accuracy = record.answers.length ? Math.round(score / record.totalQuestions * 100) + "%" : "—";
+        const rapid = record.rapidFinal || {};
+        const rapidStatus = !rapid.eligible ? "Not eligible" :
+          rapid.status === "completed" ? `Completed · #${rapid.ranking || "TIE"}` :
+            rapid.status === "in_progress" ? "In progress" : "Eligible · not started";
         return `<tr>
           <td><button class="link-button" data-participant="${esc(record.id)}">${esc(record.id)}</button></td>
           <td>${esc(p.fullName)}</td><td>${esc(p.college)}</td>
           <td><a href="mailto:${encodeURIComponent(p.email)}">${esc(p.email)}</a></td>
           <td>${esc(p.phone)}</td><td>${esc(p.year)}</td><td>${esc(p.department)}</td>
-          <td>${score}/${record.totalQuestions}</td><td>${accuracy}</td><td><span class="status ${record.status === "Completed" ? "done" : "pending"}">${esc(record.status)}</span></td>
+          <td>${score}/${record.totalQuestions}</td><td>${accuracy}</td><td>${esc(rapidStatus)}</td>
+          <td><span class="status ${record.status === "Completed" ? "done" : "pending"}">${esc(record.status)}</span></td>
         </tr>`;
-      }).join("") : `<tr><td colspan="10" class="empty">No participants match these filters.</td></tr>`;
+      }).join("") : `<tr><td colspan="11" class="empty">No participants match these filters.</td></tr>`;
+      const rankingRecords = records.filter(record => record.rapidFinal?.eligible)
+        .sort((left, right) => {
+          if (left.rapidFinal.ranking == null) return right.rapidFinal.ranking == null ? 0 : 1;
+          if (right.rapidFinal.ranking == null) return -1;
+          return left.rapidFinal.ranking - right.rapidFinal.ranking;
+        });
+      $("#rapidRankingRows").innerHTML = rankingRecords.length ? rankingRecords.map(record => {
+        const rapid = record.rapidFinal;
+        const rankLabel = rapid.status !== "completed" ? "—" :
+          rapid.isTied ? `TIE · ${rapid.ranking}` : String(rapid.ranking);
+        const correctTime = rapid.status === "completed"
+          ? `${(rapid.totalCorrectResponseMs / 1000).toFixed(2)} s` : "—";
+        return `<tr><td>${rankLabel}</td><td>${esc(record.participant.fullName)}</td>
+          <td>${rapid.mainPercentage.toFixed(1)}%</td><td>ELIGIBLE</td>
+          <td>${esc(rapid.status.replace("_", " "))}</td><td>${rapid.score == null ? "—" : `${rapid.score} / 5`}</td>
+          <td>${correctTime}</td><td>${rapid.combinedScore == null ? "—" : `${rapid.combinedScore} / 45`}</td></tr>`;
+      }).join("") : `<tr><td colspan="8" class="empty">No 95%+ qualifiers yet.</td></tr>`;
       report("#adminError", "");
     } catch (error) {
-      $("#participantRows").innerHTML = `<tr><td colspan="10" class="empty">Could not load participant data: ${esc(error.message)}</td></tr>`;
+      $("#participantRows").innerHTML = `<tr><td colspan="11" class="empty">Could not load participant data: ${esc(error.message)}</td></tr>`;
       report("#adminCount", "Storage error");
     }
   }
@@ -523,6 +820,19 @@
           <td>${review ? esc(review.correctAnswer) : "—"}</td>
           <td>${review ? (review.isCorrect ? "Correct" : "Incorrect") : "—"}</td></tr>`;
       }).join("");
+      const rapid = record.rapidFinal || {};
+      const rapidRows = (rapid.answers || []).map((answer, index) => {
+        const selected = answer.choiceIndex == null ? "Timed out / unanswered" :
+          `Option ${String.fromCharCode(65 + answer.choiceIndex)}: ${answer.options[answer.choiceIndex]}`;
+        const expected = answer.correctAnswer == null ? "—" :
+          `Option ${String.fromCharCode(65 + answer.correctAnswer)}: ${answer.options[answer.correctAnswer]}`;
+        const correctness = answer.choiceIndex == null ? "Unanswered" :
+          answer.isCorrect ? "Correct" : "Incorrect";
+        return `<tr><td>${index + 1}</td><td>${esc(answer.title)}</td><td>${esc(selected)}</td>
+          <td>${esc(expected)}</td><td>${correctness}</td>
+          <td>${(answer.responseTimeMs / 1000).toFixed(2)} s</td>
+          <td>${esc(formatTime(answer.submittedAt))}</td></tr>`;
+      }).join("");
       detail.innerHTML = `
         <div class="admin-heading"><div><p class="eyebrow">PARTICIPANT PROFILE</p><h2>${esc(p.fullName)}</h2></div>
           <button class="btn btn-sm" id="closeParticipantDetail">CLOSE</button></div>
@@ -546,6 +856,21 @@
           <div class="tile"><b>${scores[2]} / 15</b><span>Round 2</span></div>
           <div class="tile"><b>${scores[3]} / 10</b><span>Final round</span></div>
         </div>
+        <h3>RAPID FINAL · 95%+ tie-breaker</h3>
+        <div class="profile-grid">
+          <p><b>Main quiz percentage</b><span>${record.status === "Completed" ? `${(record.score / record.totalQuestions * 100).toFixed(1)}%` : "In progress"}</span></p>
+          <p><b>Eligibility</b><span>${rapid.eligible ? "Eligible" : "Not eligible"}</span></p>
+          <p><b>Challenge status</b><span>${esc(rapid.status || "not_attempted")}</span></p>
+          <p><b>RAPID FINAL score</b><span>${rapid.score == null ? "—" : `${rapid.score} / 5`}</span></p>
+          <p><b>Unanswered / timed out</b><span>${rapid.unansweredCount || 0}</span></p>
+          <p><b>Correct-answer response time</b><span>${rapid.status === "completed" ? `${(rapid.totalCorrectResponseMs / 1000).toFixed(2)} s` : "—"}</span></p>
+          <p><b>Combined score</b><span>${rapid.combinedScore == null ? "—" : `${rapid.combinedScore} / 45`}</span></p>
+          <p><b>Tie-breaker rank</b><span>${rapid.ranking == null ? "—" : rapid.isTied ? `Tie at rank ${rapid.ranking}` : rapid.ranking}</span></p>
+        </div>
+        <p class="qmeta">Ranking: higher RAPID FINAL score, then lower total server-recorded response time on correct answers. Equal values are tied.</p>
+        <div class="table-scroll"><table class="admin-table">
+          <thead><tr><th>Q</th><th>Scenario</th><th>Participant answer</th><th>Correct answer</th><th>Result</th><th>Response time</th><th>Server received</th></tr></thead>
+          <tbody>${rapidRows || `<tr><td colspan="7" class="empty">No RAPID FINAL responses recorded.</td></tr>`}</tbody></table></div>
         <h3>Question-wise answer review</h3>
         <p class="qmeta">Correct-answer review is visible only in the admin portal.</p>
         <div class="table-scroll"><table class="admin-table">
@@ -581,14 +906,21 @@
       const records = attempts();
       const rows = [["Participant ID", "Name", "College", "Email", "Phone", "Year", "Department",
         "Round 1 Score", "Round 2 Score", "Final Round Score", "Total Score", "Accuracy", "Status",
-        "Start Time", "Completion Time"]];
+        "Start Time", "Completion Time", "RAPID Eligible", "RAPID Status", "RAPID Score",
+        "Correct Response Time ms", "Combined Score / 45", "RAPID Rank"]];
       records.forEach(record => {
         const score = PGQuizService.score(record);
         rows.push([record.id, record.participant.fullName, record.participant.college, record.participant.email,
           record.participant.phone, record.participant.year, record.participant.department,
           score.roundScores[1], score.roundScores[2], score.roundScores[3], score.total,
           record.answers.length ? Math.round(score.total / record.totalQuestions * 100) + "%" : "",
-          record.status, record.startedAt, record.completedAt || ""]);
+          record.status, record.startedAt, record.completedAt || "",
+          record.rapidFinal?.eligible ? "Yes" : "No",
+          record.rapidFinal?.status || "not_attempted",
+          record.rapidFinal?.score ?? "",
+          record.rapidFinal?.totalCorrectResponseMs ?? "",
+          record.rapidFinal?.combinedScore ?? "",
+          record.rapidFinal?.ranking ?? ""]);
       });
       downloadCsv("phishguard-results.csv", rows);
       setText("#adminCount", `Exported ${records.length} participant records`);
@@ -596,7 +928,7 @@
   }
   function exportAnswers() {
     try {
-      const rows = [["Participant ID", "Name", "Question", "Round", "Participant Answer", "Correct Answer", "Result"]];
+      const rows = [["Participant ID", "Name", "Assessment", "Question", "Round", "Participant Answer", "Correct Answer", "Result", "Response Time ms", "Server Received", "Explanation"]];
       attempts().forEach(record => {
         const answers = new Map(record.answers.map(answer => [answer.questionId, answer]));
         record.questionIds.forEach((id, index) => {
@@ -604,10 +936,18 @@
           if (!question) return;
           const answer = answers.get(id);
           const round = index < 15 ? "Round 1" : index < 30 ? "Round 2" : "Final Round";
-          rows.push([record.id, record.participant.fullName, question.title, round,
+          rows.push([record.id, record.participant.fullName, "Main Quiz", question.title, round,
             answer ? answer.choice : "No answer submitted",
             record.resultReview?.[index]?.correctAnswer || "—",
-            record.resultReview?.[index] ? (record.resultReview[index].isCorrect ? "Correct" : "Incorrect") : "—"]);
+            record.resultReview?.[index] ? (record.resultReview[index].isCorrect ? "Correct" : "Incorrect") : "—",
+            "", "", record.resultReview?.[index]?.explanation || ""]);
+        });
+        (record.rapidFinal?.answers || []).forEach((answer, index) => {
+          rows.push([record.id, record.participant.fullName, "RAPID FINAL", answer.title, `Question ${index + 1}`,
+            answer.choiceIndex == null ? "Timed out / unanswered" : answer.options[answer.choiceIndex],
+            answer.correctAnswer == null ? "—" : answer.options[answer.correctAnswer],
+            answer.choiceIndex == null ? "Unanswered" : answer.isCorrect ? "Correct" : "Incorrect",
+            answer.responseTimeMs, new Date(answer.submittedAt).toISOString(), answer.explanation]);
         });
       });
       downloadCsv("phishguard-answer-review.csv", rows);
@@ -656,4 +996,5 @@
     }
   }).catch(error => console.error("Admin session restore:", error));
   if (activeAttemptId()) resumeActiveAttempt();
+  resumeRapidFinal();
 })();

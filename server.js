@@ -8,6 +8,7 @@ const Database = require("better-sqlite3");
 const express = require("express");
 const session = require("express-session");
 const QUIZ_ANSWER_KEY = require("./private/quiz-answer-key.json");
+const RAPID_FINAL_QUESTIONS = require("./private/rapid-final-questions.json");
 
 const ROOT = __dirname;
 const SESSION_NAME = "phishguard.sid";
@@ -16,6 +17,18 @@ const STALE_AFTER_MS = 45 * 1000;
 const ACTIVE_WINDOW_MS = 8 * 60 * 60 * 1000;
 const ROUND_SIZES = Object.freeze([15, 15, 10]);
 const TOTAL_QUESTIONS = ROUND_SIZES.reduce((sum, size) => sum + size, 0);
+const RAPID_FINAL_QUESTION_COUNT = 5;
+const RAPID_FINAL_SECONDS_PER_QUESTION = 20;
+const RAPID_FINAL_QUESTION_MS = RAPID_FINAL_SECONDS_PER_QUESTION * 1000;
+function participantMainReview(attempt) {
+  return attempt.resultReview.filter(item => !item.isCorrect).map(item => ({
+    questionId: item.questionId,
+    round: item.round,
+    choice: item.choice,
+    correctAnswer: item.correctAnswer,
+    explanation: item.explanation
+  }));
+}
 const ALLOWED_EVENTS = new Set([
   "TAB_HIDDEN", "WINDOW_BLUR", "RETURNED", "FULLSCREEN_EXIT",
   "QUIZ_PROGRESS", "PAGE_HIDDEN", "QUIZ_COMPLETED"
@@ -136,6 +149,87 @@ function normalizeAttempt(attempt, row) {
   };
 }
 
+function rapidFinalEligible(attempt) {
+  return Boolean(attempt && attempt.status === "Completed" &&
+    Number.isInteger(attempt.score) && attempt.totalQuestions === TOTAL_QUESTIONS &&
+    attempt.score / TOTAL_QUESTIONS >= 0.95);
+}
+
+function rapidFinalPublicState(record, now = Date.now()) {
+  if (!record) return { status: "not_started" };
+  if (record.status === "completed") {
+    return {
+      status: "completed",
+      score: record.score,
+      completedAt: record.completedAt
+    };
+  }
+  const questionIndex = record.questionIndex ?? record.question_index;
+  const questionStartedAt = record.questionStartedAt ?? record.question_started_at;
+  return {
+    status: "in_progress",
+    questionIndex,
+    questionCount: RAPID_FINAL_QUESTION_COUNT,
+    secondsPerQuestion: RAPID_FINAL_SECONDS_PER_QUESTION,
+    questionStartedAt,
+    deadlineAt: questionStartedAt + RAPID_FINAL_QUESTION_MS,
+    serverNow: now,
+    question: RAPID_FINAL_QUESTIONS[questionIndex]
+      ? {
+        id: RAPID_FINAL_QUESTIONS[questionIndex].id,
+        title: RAPID_FINAL_QUESTIONS[questionIndex].title,
+        scenario: RAPID_FINAL_QUESTIONS[questionIndex].scenario,
+        options: RAPID_FINAL_QUESTIONS[questionIndex].options
+      }
+      : null
+  };
+}
+
+function rapidFinalAdminView(record) {
+  if (!record) return { status: "not_attempted", score: null, ranking: null };
+  const answers = JSON.parse(record.answers_json);
+  return {
+    status: record.status,
+    score: record.status === "completed" ? record.score : null,
+    startedAt: record.started_at,
+    completedAt: record.completed_at,
+    totalCorrectResponseMs: record.total_correct_response_ms,
+    unansweredCount: answers.filter(answer => answer.choiceIndex === null).length,
+    answers: answers.map(answer => {
+      const question = RAPID_FINAL_QUESTIONS.find(item => item.id === answer.questionId);
+      return {
+        ...answer,
+        question: question ? question.scenario : "",
+        title: question ? question.title : answer.questionId,
+        options: question ? question.options : [],
+        correctAnswer: question ? question.answer : null,
+        explanation: question ? question.explanation : ""
+      };
+    })
+  };
+}
+
+function rankRapidFinal(records) {
+  const ranked = records.filter(record => record.rapidFinal.eligible &&
+    record.rapidFinal.status === "completed")
+    .sort((left, right) => right.rapidFinal.score - left.rapidFinal.score ||
+      left.rapidFinal.totalCorrectResponseMs - right.rapidFinal.totalCorrectResponseMs);
+  let rank = 0;
+  for (let index = 0; index < ranked.length; index++) {
+    const current = ranked[index].rapidFinal;
+    const previous = ranked[index - 1]?.rapidFinal;
+    if (!previous || current.score !== previous.score ||
+        current.totalCorrectResponseMs !== previous.totalCorrectResponseMs) rank = index + 1;
+    current.ranking = rank;
+    current.isTied = Boolean(previous && current.score === previous.score &&
+      current.totalCorrectResponseMs === previous.totalCorrectResponseMs) ||
+      Boolean(ranked[index + 1] &&
+        current.score === ranked[index + 1].rapidFinal.score &&
+        current.totalCorrectResponseMs === ranked[index + 1].rapidFinal.totalCorrectResponseMs);
+  }
+  return records;
+}
+
 function deviceType(userAgent = "") {
   if (/ipad|tablet|kindle|silk/i.test(userAgent)) return "TABLET";
   if (/mobile|iphone|ipod|android/i.test(userAgent)) return "MOBILE";
@@ -204,6 +298,21 @@ function createDatabase(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS participant_attempts_updated
       ON participant_attempts(updated_at DESC);
+    CREATE TABLE IF NOT EXISTS rapid_final_attempts (
+      quiz_session_id TEXT PRIMARY KEY REFERENCES quiz_monitor_sessions(quiz_session_id),
+      participant_id TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL CHECK(status IN ('in_progress', 'completed')),
+      question_index INTEGER NOT NULL DEFAULT 0,
+      started_at INTEGER NOT NULL,
+      question_started_at INTEGER NOT NULL,
+      answers_json TEXT NOT NULL DEFAULT '[]',
+      completed_at INTEGER,
+      score INTEGER,
+      total_correct_response_ms INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS rapid_final_ranking
+      ON rapid_final_attempts(status, score DESC, total_correct_response_ms ASC);
   `);
   const sessionColumns = db.pragma("table_info(quiz_monitor_sessions)");
   if (!sessionColumns.some(column => column.name === "client_start_id")) {
@@ -296,6 +405,7 @@ function createApp(options = {}) {
   const adminId = options.adminId || process.env.PHISHGUARD_ADMIN_ID;
   const adminPasswordHash = options.adminPasswordHash || process.env.PHISHGUARD_ADMIN_PASSWORD_HASH;
   const sessionSecret = options.sessionSecret || process.env.PHISHGUARD_SESSION_SECRET;
+  const rapidFinalClock = options.rapidFinalClock || Date.now;
   if (!adminId || !adminPasswordHash) {
     throw new Error("Set PHISHGUARD_ADMIN_ID and PHISHGUARD_ADMIN_PASSWORD_HASH.");
   }
@@ -362,8 +472,33 @@ function createApp(options = {}) {
       ON CONFLICT(quiz_session_id) DO UPDATE SET
         attempt_json = excluded.attempt_json, updated_at = excluded.updated_at
     `),
+    getAttempt: db.prepare("SELECT attempt_json FROM participant_attempts WHERE quiz_session_id = ?"),
     allAttempts: db.prepare(`
-      SELECT attempt_json FROM participant_attempts ORDER BY updated_at DESC
+      SELECT quiz_session_id, attempt_json FROM participant_attempts ORDER BY updated_at DESC
+    `),
+    latestOwnedAttempt: db.prepare(`
+      SELECT s.quiz_session_id, a.attempt_json
+      FROM quiz_monitor_sessions s
+      JOIN participant_attempts a ON a.quiz_session_id = s.quiz_session_id
+      WHERE s.owner_sid = ?
+      ORDER BY s.created_at DESC LIMIT 1
+    `),
+    rapidForSession: db.prepare("SELECT * FROM rapid_final_attempts WHERE quiz_session_id = ?"),
+    allRapidFinalAttempts: db.prepare("SELECT * FROM rapid_final_attempts"),
+    insertRapidFinalAttempt: db.prepare(`
+      INSERT OR IGNORE INTO rapid_final_attempts (
+        quiz_session_id, participant_id, status, question_index, started_at,
+        question_started_at, answers_json, updated_at
+      ) VALUES (?, ?, 'in_progress', 0, ?, ?, '[]', ?)
+    `),
+    updateRapidFinalAttempt: db.prepare(`
+      UPDATE rapid_final_attempts SET status = @status, question_index = @questionIndex,
+        question_started_at = @questionStartedAt, answers_json = @answersJson,
+        completed_at = @completedAt, score = @score,
+        total_correct_response_ms = @totalCorrectResponseMs, updated_at = @updatedAt
+      WHERE quiz_session_id = @quizSessionId AND status = 'in_progress'
+        AND question_index = @expectedQuestionIndex
+        AND question_started_at = @expectedQuestionStartedAt
     `)
   };
   const adminStreams = new Map();
@@ -431,6 +566,36 @@ function createApp(options = {}) {
     if (row.tab_switches || row.focus_losses || row.fullscreen_exits) return "ATTENTION";
     return "ACTIVE";
   }
+  function adminAttempts() {
+    const rapidBySession = new Map(statements.allRapidFinalAttempts.all().map(record => {
+      const current = advanceExpiredRapidFinal(record, rapidFinalClock());
+      return [current.quiz_session_id, current];
+    }));
+    const records = statements.allAttempts.all().map(row => {
+      const record = JSON.parse(row.attempt_json);
+      const rapid = rapidFinalAdminView(rapidBySession.get(row.quiz_session_id));
+      const mainPercentage = record.status === "Completed"
+        ? record.score / record.totalQuestions * 100
+        : null;
+      return {
+        ...record,
+        rapidFinal: {
+          eligible: rapidFinalEligible(record),
+          mainPercentage,
+          status: rapid.status,
+          score: rapid.score,
+          startedAt: rapid.startedAt || null,
+          completedAt: rapid.completedAt || null,
+          totalCorrectResponseMs: rapid.totalCorrectResponseMs || 0,
+          unansweredCount: rapid.unansweredCount || 0,
+          answers: rapid.answers || [],
+          ranking: null,
+          combinedScore: rapid.status === "completed" ? record.score + rapid.score : null
+        }
+      };
+    });
+    return rankRapidFinal(records);
+  }
   function snapshot() {
     const cutoff = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
     const now = Date.now();
@@ -439,7 +604,7 @@ function createApp(options = {}) {
       backendInstanceId,
       participants: statements.activeSessions.all(cutoff).map(row => snapshotParticipant(row, now)),
       events: statements.recentEvents.all(cutoff),
-      attempts: statements.allAttempts.all().map(row => JSON.parse(row.attempt_json))
+      attempts: adminAttempts()
     };
   }
   function publishParticipant(row, event = null) {
@@ -459,13 +624,18 @@ function createApp(options = {}) {
   }
   function publishAttempt(attempt) {
     if (adminStreams.size === 0) return;
-    const payload = `event: monitor\ndata: ${JSON.stringify({ type: "attempt-upsert", attempt })}\n\n`;
+    const adminAttempt = adminAttempts().find(record => record.id === attempt.id) || attempt;
+    const payload = `event: monitor\ndata: ${JSON.stringify({ type: "attempt-upsert", attempt: adminAttempt })}\n\n`;
     for (const response of adminStreams.keys()) {
       if (!response.write(payload)) {
         response.end();
         adminStreams.delete(response);
       }
     }
+  }
+  function publishRapidFinalUpdate(quizSessionId) {
+    const saved = statements.getAttempt.get(quizSessionId);
+    if (saved) publishAttempt(JSON.parse(saved.attempt_json));
   }
   function snapshotParticipant(row, now = Date.now()) {
     return {
@@ -829,6 +999,11 @@ function createApp(options = {}) {
     if (!row) return res.status(404).json({ error: "Participant quiz session was not found." });
     const record = normalizeAttempt(attempt, row);
     if (!record) return res.status(400).json({ error: "Participant quiz attempt is invalid." });
+    const previous = statements.getAttempt.get(quizSessionId);
+    if (previous && JSON.parse(previous.attempt_json).status === "Completed" &&
+        JSON.stringify(JSON.parse(previous.attempt_json)) !== JSON.stringify(record)) {
+      return res.status(409).json({ error: "A completed main quiz attempt cannot be changed." });
+    }
     const updatedAt = serverTimestamp();
     try {
       statements.saveAttempt.run(quizSessionId, row.participant_id, JSON.stringify(record), updatedAt);
@@ -838,18 +1013,204 @@ function createApp(options = {}) {
         result.score = record.score;
         result.roundScores = record.roundScores;
         result.accuracy = record.accuracy;
-        result.review = record.resultReview.filter(item => !item.isCorrect).map(item => ({
-          questionId: item.questionId,
-          round: item.round,
-          choice: item.choice,
-          correctAnswer: item.correctAnswer,
-          explanation: item.explanation
-        }));
+        result.rapidFinalEligible = rapidFinalEligible(record);
+        result.mainPercentage = record.score / record.totalQuestions * 100;
+        result.review = participantMainReview(record);
       }
       res.status(200).json(result);
     } catch (error) {
       next(error);
     }
+  });
+
+  function completedParticipantAttempt(req) {
+    const row = statements.latestOwnedAttempt.get(req.sessionID);
+    if (!row) return null;
+    return {
+      quizSessionId: row.quiz_session_id,
+      attempt: JSON.parse(row.attempt_json)
+    };
+  }
+
+  function updateRapidFinalRecord(record, expectedRecord) {
+    const result = statements.updateRapidFinalAttempt.run({
+      quizSessionId: record.quiz_session_id,
+      status: record.status,
+      questionIndex: record.question_index,
+      questionStartedAt: record.question_started_at,
+      expectedQuestionIndex: expectedRecord.question_index,
+      expectedQuestionStartedAt: expectedRecord.question_started_at,
+      answersJson: record.answers_json,
+      completedAt: record.completed_at,
+      score: record.score,
+      totalCorrectResponseMs: record.total_correct_response_ms,
+      updatedAt: record.updated_at
+    });
+    return result.changes === 1;
+  }
+
+  function advanceExpiredRapidFinal(record, now) {
+    if (!record || record.status !== "in_progress") return record;
+    const answers = JSON.parse(record.answers_json);
+    let questionIndex = record.question_index;
+    let questionStartedAt = record.question_started_at;
+    let completedAt = record.completed_at;
+    let score = record.score;
+    let totalCorrectResponseMs = record.total_correct_response_ms;
+    let changed = false;
+    while (questionIndex < RAPID_FINAL_QUESTION_COUNT &&
+        now >= questionStartedAt + RAPID_FINAL_QUESTION_MS) {
+      const deadline = questionStartedAt + RAPID_FINAL_QUESTION_MS;
+      answers.push({
+        questionId: RAPID_FINAL_QUESTIONS[questionIndex].id,
+        choiceIndex: null,
+        isCorrect: false,
+        startedAt: questionStartedAt,
+        submittedAt: deadline,
+        responseTimeMs: RAPID_FINAL_QUESTION_MS,
+        requestId: null
+      });
+      questionIndex++;
+      questionStartedAt = deadline;
+      changed = true;
+      if (questionIndex === RAPID_FINAL_QUESTION_COUNT) {
+        completedAt = deadline;
+        score = answers.filter(answer => answer.isCorrect).length;
+      }
+    }
+    if (!changed) return record;
+    const updated = {
+      ...record,
+      status: questionIndex === RAPID_FINAL_QUESTION_COUNT ? "completed" : "in_progress",
+      question_index: questionIndex,
+      question_started_at: questionStartedAt,
+      answers_json: JSON.stringify(answers),
+      completed_at: completedAt,
+      score,
+      total_correct_response_ms: totalCorrectResponseMs,
+      updated_at: now
+    };
+    if (!updateRapidFinalRecord(updated, record)) {
+      return statements.rapidForSession.get(record.quiz_session_id);
+    }
+    return updated;
+  }
+
+  app.get("/api/rapid-final/status", requireParticipant, (req, res) => {
+    const owned = completedParticipantAttempt(req);
+    if (!owned) return res.status(403).json({ error: "Complete the main quiz before checking RAPID FINAL eligibility." });
+    const eligible = rapidFinalEligible(owned.attempt);
+    const rapid = eligible ? statements.rapidForSession.get(owned.quizSessionId) : null;
+    const now = rapidFinalClock();
+    const current = rapid ? advanceExpiredRapidFinal(rapid, now) : null;
+    if (rapid && current.updated_at !== rapid.updated_at) publishRapidFinalUpdate(owned.quizSessionId);
+    res.json({
+      eligible,
+      mainPercentage: owned.attempt.score / owned.attempt.totalQuestions * 100,
+      mainScore: owned.attempt.score,
+      mainRoundScores: owned.attempt.roundScores,
+      mainReview: participantMainReview(owned.attempt),
+      participantId: owned.attempt.id,
+      status: !eligible ? "not_eligible" : current ? current.status : "available",
+      rapidFinal: rapidFinalPublicState(current, now)
+    });
+  });
+
+  app.post("/api/rapid-final/start", requireSameOriginJson, requireParticipant, (req, res) => {
+    const owned = completedParticipantAttempt(req);
+    if (!owned || !rapidFinalEligible(owned.attempt)) {
+      return res.status(403).json({ error: "RAPID FINAL requires a completed main-quiz score of at least 95%." });
+    }
+    let record = statements.rapidForSession.get(owned.quizSessionId);
+    const now = rapidFinalClock();
+    if (!record) {
+      statements.insertRapidFinalAttempt.run(
+        owned.quizSessionId, owned.attempt.id, now, now, now
+      );
+      record = statements.rapidForSession.get(owned.quizSessionId);
+    }
+    record = advanceExpiredRapidFinal(record, now);
+    publishRapidFinalUpdate(owned.quizSessionId);
+    res.json(rapidFinalPublicState(record, now));
+  });
+
+  app.get("/api/rapid-final/state", requireParticipant, (req, res) => {
+    const owned = completedParticipantAttempt(req);
+    if (!owned || !rapidFinalEligible(owned.attempt)) {
+      return res.status(403).json({ error: "RAPID FINAL is available only to participants who qualify." });
+    }
+    const record = statements.rapidForSession.get(owned.quizSessionId);
+    if (!record) return res.status(404).json({ error: "RAPID FINAL has not been started." });
+    const now = rapidFinalClock();
+    const current = advanceExpiredRapidFinal(record, now);
+    if (current.updated_at !== record.updated_at) publishRapidFinalUpdate(owned.quizSessionId);
+    res.json(rapidFinalPublicState(current, now));
+  });
+
+  app.post("/api/rapid-final/answer", requireSameOriginJson, requireParticipant, (req, res) => {
+    const owned = completedParticipantAttempt(req);
+    if (!owned || !rapidFinalEligible(owned.attempt)) {
+      return res.status(403).json({ error: "RAPID FINAL is available only to participants who qualify." });
+    }
+    if (!Number.isInteger(req.body.questionIndex) ||
+        (req.body.choiceIndex !== null &&
+          (!Number.isInteger(req.body.choiceIndex) || req.body.choiceIndex < 0 || req.body.choiceIndex > 3)) ||
+        !isText(req.body.requestId, 80) ||
+        !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(req.body.requestId)) {
+      return res.status(400).json({ error: "RAPID FINAL answer submission is invalid." });
+    }
+    let record = statements.rapidForSession.get(owned.quizSessionId);
+    if (!record) return res.status(404).json({ error: "RAPID FINAL has not been started." });
+    const answers = JSON.parse(record.answers_json);
+    if (answers.some(answer => answer.requestId === req.body.requestId)) {
+      const now = rapidFinalClock();
+      return res.json(rapidFinalPublicState(advanceExpiredRapidFinal(record, now), now));
+    }
+    const now = rapidFinalClock();
+    record = advanceExpiredRapidFinal(record, now);
+    if (record.status === "completed") return res.json(rapidFinalPublicState(record, now));
+    if (req.body.questionIndex !== record.question_index) {
+      return res.status(409).json({
+        error: "That question is no longer active.",
+        state: rapidFinalPublicState(record, now)
+      });
+    }
+    const responseTimeMs = Math.max(0, now - record.question_started_at);
+    const question = RAPID_FINAL_QUESTIONS[record.question_index];
+    answers.push({
+      questionId: question.id,
+      choiceIndex: req.body.choiceIndex,
+      isCorrect: req.body.choiceIndex === question.answer,
+      startedAt: record.question_started_at,
+      submittedAt: now,
+      responseTimeMs,
+      requestId: req.body.requestId
+    });
+    const nextIndex = record.question_index + 1;
+    const completed = nextIndex === RAPID_FINAL_QUESTION_COUNT;
+    const score = completed ? answers.filter(answer => answer.isCorrect).length : null;
+    const correctTime = req.body.choiceIndex === question.answer
+      ? responseTimeMs : 0;
+    const updated = {
+      ...record,
+      status: completed ? "completed" : "in_progress",
+      question_index: nextIndex,
+      question_started_at: now,
+      answers_json: JSON.stringify(answers),
+      completed_at: completed ? now : null,
+      score,
+      total_correct_response_ms: record.total_correct_response_ms + correctTime,
+      updated_at: now
+    };
+    if (!updateRapidFinalRecord(updated, record)) {
+      const latest = statements.rapidForSession.get(owned.quizSessionId);
+      return res.status(409).json({
+        error: "That answer was already recorded.",
+        state: rapidFinalPublicState(latest, now)
+      });
+    }
+    publishRapidFinalUpdate(owned.quizSessionId);
+    res.json(rapidFinalPublicState(updated, now));
   });
 
   app.use((req, res, next) => {
@@ -904,4 +1265,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { createApp };
+module.exports = { createApp, rapidFinalEligible, rankRapidFinal };

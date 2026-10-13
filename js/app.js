@@ -19,6 +19,8 @@ function toast(msg,kind){
 }
 function go(id){
   if(id==="admin" && (!window.PGAuthService || !PGAuthService.isAuthenticated())) id="admin-login";
+  if(id.startsWith("rapid-") &&
+     (!window.PGPortalCanOpenRapidFinal || !PGPortalCanOpenRapidFinal())) id="completion";
   if(id==="participant-details" && window.PGPortalResume && PGPortalResume()) return;
   $$("section.view").forEach(v=>v.classList.remove("active"));
   const el=$("#view-"+id); if(el){el.classList.add("active");}
