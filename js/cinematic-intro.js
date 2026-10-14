@@ -78,6 +78,25 @@
   }
   window.PGCinematicIntro = Object.freeze({ dismiss, revealEntry });
 
+  let restoringParticipant = false;
+  try {
+    const savedView = sessionStorage.getItem("phishguard.last-view.v1");
+    restoringParticipant = Boolean(
+      sessionStorage.getItem("phishguard.active.attempt.v1") ||
+      sessionStorage.getItem("phishguard.main-completed.v1") ||
+      sessionStorage.getItem("phishguard.rapid-final.active.v1") ||
+      ["participant-details", "contest-quiz", "round-transition", "completion",
+        "rapid-access", "rapid-challenge", "rapid-completion"].includes(savedView)
+    );
+  } catch (error) {
+    console.warn("Could not check whether a participant journey is being restored:", error);
+  }
+  if (restoringParticipant) {
+    dismiss();
+    intro.hidden = true;
+    return;
+  }
+
   function resize() {
     const bounds = canvas.getBoundingClientRect();
     width = Math.max(1, bounds.width);

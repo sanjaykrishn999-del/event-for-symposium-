@@ -25,6 +25,7 @@
   let attemptSyncPromise = null;
   let attemptSyncRetry = 0;
   let attemptSyncRetryCount = 0;
+  const pendingAttempts = [];
   let latestAttempt = null;
   let latestAttemptResult = null;
   let listenersAttached = false;
@@ -132,38 +133,42 @@
   }
 
   function scheduleAttemptRetry(error) {
-    if (!latestAttempt || !isRetryable(error) || attemptSyncRetry) return;
+    if (!pendingAttempts.length || !isRetryable(error) || attemptSyncRetry) return;
     const delay = Math.min(1000 * (2 ** attemptSyncRetryCount), MAX_RETRY_MS);
     attemptSyncRetryCount++;
     attemptSyncRetry = window.setTimeout(() => {
       attemptSyncRetry = 0;
-      syncAttempt(latestAttempt);
+      flushAttemptSync();
     }, delay);
   }
 
   function flushAttemptSync() {
     if (attemptSyncPromise) return attemptSyncPromise;
-    if (!sessionId || !latestAttempt) return Promise.resolve(false);
+    if (!sessionId || !pendingAttempts.length) return Promise.resolve(false);
     attemptSyncPromise = (async () => {
-      while (sessionId && latestAttempt) {
-        const attempt = latestAttempt;
-        latestAttempt = null;
+      while (sessionId && pendingAttempts.length) {
+        const attempt = pendingAttempts.shift();
         try {
           latestAttemptResult = await post(`${API}/attempts`, { quizSessionId: sessionId, attempt });
           attemptSyncRetryCount = 0;
           if (statusHandler) statusHandler(null);
         } catch (error) {
-          latestAttempt = latestAttempt || attempt;
+          pendingAttempts.unshift(attempt);
+          latestAttempt = pendingAttempts[pendingAttempts.length - 1] || attempt;
           reportError(error);
           if (isRetryable(error)) scheduleAttemptRetry(error);
-          else latestAttempt = null;
+          else {
+            pendingAttempts.shift();
+            latestAttempt = pendingAttempts[pendingAttempts.length - 1] || null;
+          }
           return false;
         }
       }
+      latestAttempt = null;
       return latestAttemptResult;
     })().finally(() => {
       attemptSyncPromise = null;
-      if (latestAttempt && !attemptSyncRetry) flushAttemptSync();
+      if (pendingAttempts.length && !attemptSyncRetry) flushAttemptSync();
       finalizeSession();
     });
     return attemptSyncPromise;
@@ -171,7 +176,9 @@
 
   function syncAttempt(attempt) {
     if (!attempt) return Promise.resolve(false);
-    latestAttempt = attempt;
+    const snapshot = JSON.parse(JSON.stringify(attempt));
+    pendingAttempts.push(snapshot);
+    latestAttempt = snapshot;
     return flushAttemptSync();
   }
 
@@ -319,6 +326,64 @@
     return startPromise;
   }
 
+  async function restore(attempt, quizSessionId, onIdentity, previousAttempt = null) {
+    if (!attempt || !quizSessionId) throw new Error("Saved participant session details are incomplete.");
+    sessionId = quizSessionId;
+    sessionStorage.setItem(SESSION_KEY, sessionId);
+    if (previousAttempt && previousAttempt.answers.length <= attempt.answers.length) {
+      for (let count = previousAttempt.answers.length + 1; count <= attempt.answers.length; count++) {
+        const answers = attempt.answers.slice(0, count);
+        const currentRound = answers[count - 1].round;
+        const currentQuestion = answers.filter(answer => answer.round === currentRound).length;
+        const finalCompletedStep = attempt.status === "Completed" && count === attempt.answers.length;
+        const snapshot = {
+          ...attempt,
+          answers,
+          currentRound,
+          currentQuestion,
+          status: finalCompletedStep ? "Completed" : "In Progress",
+          completedAt: finalCompletedStep ? attempt.completedAt : null,
+          score: null,
+          accuracy: null
+        };
+        await post(`${API}/attempts`, { quizSessionId: sessionId, attempt: snapshot });
+      }
+      const latestAnswer = attempt.answers[attempt.answers.length - 1];
+      const positionMatches = latestAnswer &&
+        attempt.currentRound === latestAnswer.round &&
+        attempt.currentQuestion === attempt.answers.filter(answer =>
+          answer.round === attempt.currentRound).length;
+      if (attempt.status === "Completed" &&
+          attempt.answers.length === previousAttempt.answers.length) {
+        await post(`${API}/attempts`, { quizSessionId: sessionId, attempt });
+      } else if (attempt.status === "In Progress" && !positionMatches) {
+        await post(`${API}/attempts`, { quizSessionId: sessionId, attempt });
+      }
+    } else {
+      await post(`${API}/attempts`, { quizSessionId: sessionId, attempt });
+    }
+    if (attempt.status === "Completed") {
+      const result = await post(`${API}/attempts`, { quizSessionId: sessionId, attempt });
+      try {
+        await post(`${API}/events`, {
+          quizSessionId: sessionId,
+          clientEventId: newId(),
+          eventType: "QUIZ_COMPLETED",
+          round: 3,
+          questionNumber: window.PGQuizService.roundSize(3)
+        });
+      } catch (error) {
+        reportError(error);
+      }
+      sessionStorage.removeItem(SESSION_KEY);
+      sessionStorage.removeItem(START_REQUEST_KEY);
+      sessionId = "";
+      return result;
+    }
+    await start(attempt, onIdentity);
+    return true;
+  }
+
   function onOnline() {
     if (!active && pendingAttempt) start(pendingAttempt);
     if (latestAttempt) syncAttempt(latestAttempt);
@@ -438,7 +503,7 @@
     statusHandler = typeof handler === "function" ? handler : null;
   }
   window.PGMonitoringService = Object.freeze({
-    start, updateProgress, syncAttempt, finish, adminSnapshot, subscribeAdmin,
+    start, restore, updateProgress, syncAttempt, finish, adminSnapshot, subscribeAdmin,
     setStatusHandler
   });
 })();

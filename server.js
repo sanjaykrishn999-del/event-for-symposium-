@@ -483,6 +483,14 @@ function createApp(options = {}) {
       WHERE s.owner_sid = ?
       ORDER BY s.created_at DESC LIMIT 1
     `),
+    latestOwnedSession: db.prepare(`
+      SELECT s.quiz_session_id, s.participant_id, s.current_round, s.current_question,
+        s.current_state, a.attempt_json
+      FROM quiz_monitor_sessions s
+      LEFT JOIN participant_attempts a ON a.quiz_session_id = s.quiz_session_id
+      WHERE s.owner_sid = ?
+      ORDER BY s.created_at DESC LIMIT 1
+    `),
     rapidForSession: db.prepare("SELECT * FROM rapid_final_attempts WHERE quiz_session_id = ?"),
     allRapidFinalAttempts: db.prepare("SELECT * FROM rapid_final_attempts"),
     insertRapidFinalAttempt: db.prepare(`
@@ -853,6 +861,19 @@ function createApp(options = {}) {
     }
     const question = parseRoundQuestion(req.body);
     if (!question) return res.status(400).json({ error: "Round or question number is invalid." });
+    const savedAttempt = statements.getAttempt.get(row.quiz_session_id);
+    if (savedAttempt) {
+      const progress = JSON.parse(savedAttempt.attempt_json);
+      const expectedQuestion = Math.min(
+        progress.currentQuestion + 1,
+        ROUND_SIZES[progress.currentRound - 1]
+      );
+      if (question.round !== progress.currentRound || question.questionNumber !== expectedQuestion) {
+        return res.status(409).json({ error: "Resume position does not match the saved quiz progress." });
+      }
+    } else if (question.round !== row.current_round || question.questionNumber !== row.current_question) {
+      return res.status(409).json({ error: "Resume position does not match the registered quiz session." });
+    }
     const timestamp = serverTimestamp();
     const resumed = row.current_state === "AWAY";
     const durationSeconds = resumed && row.inactive_since
@@ -1000,9 +1021,29 @@ function createApp(options = {}) {
     const record = normalizeAttempt(attempt, row);
     if (!record) return res.status(400).json({ error: "Participant quiz attempt is invalid." });
     const previous = statements.getAttempt.get(quizSessionId);
-    if (previous && JSON.parse(previous.attempt_json).status === "Completed" &&
-        JSON.stringify(JSON.parse(previous.attempt_json)) !== JSON.stringify(record)) {
-      return res.status(409).json({ error: "A completed main quiz attempt cannot be changed." });
+    if (previous) {
+      const previousRecord = JSON.parse(previous.attempt_json);
+      if (previousRecord.status === "Completed" &&
+          JSON.stringify(previousRecord) !== JSON.stringify(record)) {
+        return res.status(409).json({ error: "A completed main quiz attempt cannot be changed." });
+      }
+      const progressIndex = value =>
+        ROUND_SIZES.slice(0, value.currentRound - 1).reduce((sum, size) => sum + size, 0) +
+        value.currentQuestion;
+      const previousProgress = progressIndex(previousRecord);
+      const nextProgress = progressIndex(record);
+      const previousAnswers = previousRecord.answers;
+      if (JSON.stringify(previousRecord.questionIds) !== JSON.stringify(record.questionIds) ||
+          nextProgress < previousProgress || nextProgress > previousProgress + 1 ||
+          record.answers.length < previousAnswers.length ||
+          record.answers.length > previousAnswers.length + 1 ||
+          previousAnswers.some((answer, index) => {
+            const next = record.answers[index];
+            return !next || answer.questionId !== next.questionId ||
+              answer.round !== next.round || answer.choice !== next.choice;
+          })) {
+        return res.status(409).json({ error: "Quiz progress must continue from the saved answers." });
+      }
     }
     const updatedAt = serverTimestamp();
     try {
@@ -1021,6 +1062,28 @@ function createApp(options = {}) {
     } catch (error) {
       next(error);
     }
+  });
+
+  app.get("/api/monitor/current", requireParticipant, (req, res) => {
+    const row = statements.latestOwnedSession.get(req.sessionID);
+    if (!row) return res.status(404).json({ error: "No participant quiz session is available to resume." });
+    const attempt = row.attempt_json ? JSON.parse(row.attempt_json) : null;
+    if (attempt && attempt.status !== "Completed") {
+      delete attempt.score;
+      delete attempt.roundScores;
+      delete attempt.accuracy;
+      delete attempt.resultReview;
+    } else if (attempt) {
+      attempt.resultReview = participantMainReview(attempt);
+    }
+    res.set("Cache-Control", "no-store").json({
+      quizSessionId: row.quiz_session_id,
+      participantId: row.participant_id,
+      currentRound: row.current_round,
+      currentQuestion: row.current_question,
+      sessionStatus: row.current_state,
+      attempt
+    });
   });
 
   function completedParticipantAttempt(req) {

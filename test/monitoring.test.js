@@ -262,10 +262,21 @@ test("participant events are append-only, isolated from answers, and visible liv
     body: { quizSessionId, attempt: participantAttempt() }
   });
   assert.equal(blockedAttempt.response.status, 401);
+  const initialAttempt = participantAttempt();
+  initialAttempt.questionIds = questionIds;
+  initialAttempt.currentRound = 3;
+  initialAttempt.currentQuestion = 9;
+  initialAttempt.answers = questionIds.slice(0, 39).map((id, index) => ({
+    questionId: id,
+    round: answerKey[id].round,
+    choice: [0, 15, 30].includes(index)
+      ? (answerKey[id].answer === "phishing" ? "legitimate" : "phishing")
+      : answerKey[id].answer
+  }));
   const savedAttempt = await jsonRequest("/api/monitor/attempts", {
     method: "POST",
     cookie: participantCookie,
-    body: { quizSessionId, attempt: participantAttempt() }
+    body: { quizSessionId, attempt: initialAttempt }
   });
   assert.equal(savedAttempt.response.status, 200);
   assert.equal(savedAttempt.result.participantId, start.result.participantId);
@@ -327,15 +338,7 @@ test("participant events are append-only, isolated from answers, and visible liv
   });
   assert.equal(backwards.response.status, 409);
 
-  const incompleteAttempt = participantAttempt();
-  incompleteAttempt.questionIds = questionIds;
-  incompleteAttempt.currentRound = 3;
-  incompleteAttempt.currentQuestion = 9;
-  incompleteAttempt.answers = questionIds.slice(0, 39).map((id, index) => ({
-    questionId: id,
-    round: answerKey[id].round,
-    choice: answerKey[id].answer
-  }));
+  const incompleteAttempt = { ...initialAttempt };
   const incomplete = await jsonRequest("/api/monitor/attempts", {
     method: "POST",
     cookie: participantCookie,
@@ -432,6 +435,98 @@ test("a perfect 40/40 quiz completes with no incorrect-answer review", async () 
   assert.deepEqual(result.result.roundScores, { 1: 15, 2: 15, 3: 10 });
   assert.equal(result.result.accuracy, 100);
   assert.deepEqual(result.result.review, []);
+  const resumed = await jsonRequest("/api/monitor/current", {
+    cookie: cookieFrom(start.response)
+  });
+  assert.equal(resumed.response.status, 200);
+  assert.equal(resumed.result.attempt.status, "Completed");
+  assert.equal(resumed.result.attempt.score, 40);
+  assert.deepEqual(resumed.result.attempt.roundScores, { 1: 15, 2: 15, 3: 10 });
+  assert.deepEqual(resumed.result.attempt.resultReview, []);
+});
+
+test("participant session restoration returns saved progress without exposing live scoring", async () => {
+  const started = await jsonRequest("/api/monitor/sessions", {
+    method: "POST",
+    body: {
+      startRequestId: crypto.randomUUID(),
+      participant: {
+        fullName: "Refresh Participant",
+        college: "Example College",
+        email: "refresh@example.test",
+        department: "Security",
+        year: "I Year"
+      },
+      round: 1,
+      questionNumber: 1
+    }
+  });
+  const cookie = cookieFrom(started.response);
+  const first = {
+    ...participantAttempt("Refresh Participant"),
+    id: started.result.participantId
+  };
+  const savedStart = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie,
+    body: { quizSessionId: started.result.quizSessionId, attempt: first }
+  });
+  assert.equal(savedStart.response.status, 200);
+
+  const firstRestore = await jsonRequest("/api/monitor/current", { cookie });
+  assert.equal(firstRestore.response.status, 200);
+  assert.equal(firstRestore.result.quizSessionId, started.result.quizSessionId);
+  assert.equal(firstRestore.result.participantId, started.result.participantId);
+  assert.equal(firstRestore.result.attempt.currentRound, 1);
+  assert.equal(firstRestore.result.attempt.currentQuestion, 0);
+  assert.equal(Object.hasOwn(firstRestore.result.attempt, "score"), false);
+  assert.equal(Object.hasOwn(firstRestore.result.attempt, "roundScores"), false);
+
+  const skippedAhead = {
+    ...first,
+    answers: questionIds.slice(0, 2).map(questionId => ({
+      questionId,
+      round: 1,
+      choice: answerKey[questionId].answer
+    })),
+    currentQuestion: 2
+  };
+  const rejectedJump = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie,
+    body: { quizSessionId: started.result.quizSessionId, attempt: skippedAhead }
+  });
+  assert.equal(rejectedJump.response.status, 409);
+
+  const answered = {
+    ...first,
+    answers: [{
+      questionId: questionIds[0],
+      round: 1,
+      choice: answerKey[questionIds[0]].answer
+    }],
+    currentQuestion: 1
+  };
+  const savedAnswer = await jsonRequest("/api/monitor/attempts", {
+    method: "POST",
+    cookie,
+    body: { quizSessionId: started.result.quizSessionId, attempt: answered }
+  });
+  assert.equal(savedAnswer.response.status, 200);
+  const afterAnswer = await jsonRequest("/api/monitor/current", { cookie });
+  assert.equal(afterAnswer.result.attempt.currentQuestion, 1);
+  assert.deepEqual(afterAnswer.result.attempt.answers, answered.answers);
+
+  const wrongPosition = await jsonRequest(
+    `/api/monitor/sessions/${started.result.quizSessionId}/resume`,
+    { method: "POST", cookie, body: { round: 3, questionNumber: 1 } }
+  );
+  assert.equal(wrongPosition.response.status, 409);
+  const correctPosition = await jsonRequest(
+    `/api/monitor/sessions/${started.result.quizSessionId}/resume`,
+    { method: "POST", cookie, body: { round: 1, questionNumber: 2 } }
+  );
+  assert.equal(correctPosition.response.status, 200);
 });
 
 test("RAPID FINAL eligibility is server-calculated at the exact 95 percent threshold", async () => {
@@ -447,6 +542,20 @@ test("RAPID FINAL eligibility is server-calculated at the exact 95 percent thres
   assert.equal(status.result.mainReview.length, 2);
   assert.equal(status.result.mainReview.some(item => Object.hasOwn(item, "isCorrect")), false);
   assert.equal(status.result.status, "available");
+  const rapid = await jsonRequest("/api/rapid-final/start", {
+    method: "POST", cookie: qualifier.cookie, body: {}
+  });
+  assert.equal(rapid.result.status, "in_progress");
+  const originalDeadline = rapid.result.deadlineAt;
+  rapidNow += 5000;
+  const refreshedRapid = await jsonRequest("/api/rapid-final/state", { cookie: qualifier.cookie });
+  assert.equal(refreshedRapid.result.questionIndex, rapid.result.questionIndex);
+  assert.equal(refreshedRapid.result.deadlineAt, originalDeadline);
+  assert.equal(refreshedRapid.result.deadlineAt - refreshedRapid.result.serverNow, 15000);
+  rapidNow += 15000;
+  const expiredRapid = await jsonRequest("/api/rapid-final/state", { cookie: qualifier.cookie });
+  assert.equal(expiredRapid.result.questionIndex, 1);
+  assert.equal(expiredRapid.result.deadlineAt - expiredRapid.result.serverNow, 20000);
   const belowThreshold = await completedParticipant("Below Qualification", 37);
   const belowStatus = await jsonRequest("/api/rapid-final/status", { cookie: belowThreshold.cookie });
   assert.equal(belowStatus.response.status, 200);

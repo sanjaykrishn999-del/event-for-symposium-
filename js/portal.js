@@ -3,6 +3,9 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const ACTIVE_KEY = "phishguard.active.attempt.v1";
+  const VIEW_KEY = "phishguard.last-view.v1";
+  const PENDING_ADVANCE_KEY = "phishguard.pending-answer-advance.v1";
+  const PARTICIPANT_DRAFT_KEY = "phishguard.participant-draft.v1";
   const MAIN_COMPLETION_KEY = "phishguard.main-completed.v1";
   const RAPID_FINAL_KEY = "phishguard.rapid-final.active.v1";
   const RAPID_FINAL_API = "/api/rapid-final";
@@ -21,6 +24,7 @@
   let rapidQuestionIndex = -1;
   let rapidPendingSubmission = null;
   let rapidCountdownTimer = 0;
+  let restoringQuizSessionId = "";
 
   function esc(value) {
     return String(value == null ? "" : value).replace(/[&<>"]/g, char =>
@@ -46,20 +50,35 @@
     catch (error) { return null; }
   }
 
-  function showCurrentQuestion() {
-    const question = PGQuizService.questionAt(attempt);
+  function restoreParticipantDraft() {
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(PARTICIPANT_DRAFT_KEY) || "{}");
+      for (const [name, value] of Object.entries(draft)) {
+        const field = $("#participantForm").elements.namedItem(name);
+        if (field && typeof value === "string") field.value = value;
+      }
+    } catch (error) {
+      console.warn("Could not restore participant form draft:", error);
+    }
+  }
+
+  function showCurrentQuestion({ submitted = false } = {}) {
+    const shownAttempt = submitted
+      ? { ...attempt, currentQuestion: attempt.currentQuestion - 1 }
+      : attempt;
+    const question = PGQuizService.questionAt(shownAttempt);
     if (!question) {
       report("#contestNext", "Unable to load this question. Please return to the organizer.");
       return;
     }
     answerLocked = false;
     const round = attempt.currentRound;
-    const number = attempt.currentQuestion + 1;
+    const number = shownAttempt.currentQuestion + 1;
     const total = PGQuizService.roundSize(round);
     setText("#contestRound", round === 3 ? "FINAL ROUND" : "ROUND " + round);
     setText("#contestNow", number);
     setText("#contestTotal", total);
-    setText("#contestProgress", (PGQuizService.overallIndex(attempt) + 1) + " / " + attempt.totalQuestions);
+    setText("#contestProgress", (PGQuizService.overallIndex(shownAttempt) + 1) + " / " + attempt.totalQuestions);
     $("#contestBar").style.width = ((number - 1) / total * 100) + "%";
     $("#contestStage").innerHTML = `<p class="eyebrow">${esc(question.category.toUpperCase())} · ${esc(question.title)}</p>${renderScenario(question)}`;
     const hint = PGQuizService.hintFor(question);
@@ -69,10 +88,17 @@
     $("#contestHint").classList.remove("is-visible");
     $("#showContestHint").setAttribute("aria-expanded", "false");
     $("#contestNext").innerHTML = "";
-    $("#contestLegit").disabled = false;
-    $("#contestPhish").disabled = false;
+    $("#contestLegit").disabled = submitted;
+    $("#contestPhish").disabled = submitted;
     PGMonitoringService.updateProgress(attempt);
     go("contest-quiz");
+    if (submitted) {
+      answerLocked = true;
+      const last = shownAttempt.currentQuestion + 1 === PGQuizService.roundSize(attempt.currentRound);
+      const label = last && attempt.currentRound === 3 ? "SUBMIT QUIZ →" : "NEXT QUESTION →";
+      $("#contestNext").innerHTML = `<div class="next-row"><button class="btn btn-primary" id="contestContinue">${label}</button></div>`;
+      $("#contestContinue").addEventListener("click", nextQuestion, { once: true });
+    }
   }
 
   function startAttempt(saved) {
@@ -98,6 +124,34 @@
     return false;
   }
   window.PGPortalResume = resumeActiveAttempt;
+
+  function showResumeState() {
+    if (!attempt) return;
+    if (attempt.status === "Completed") {
+      verifyCompletion(attempt);
+      return;
+    }
+    const pending = sessionStorage.getItem(PENDING_ADVANCE_KEY) === "1";
+    const lastAnswer = attempt.answers[attempt.answers.length - 1];
+    if (pending && lastAnswer && lastAnswer.round === attempt.currentRound &&
+        attempt.currentQuestion > 0) {
+      showCurrentQuestion({ submitted: true });
+      return;
+    }
+    sessionStorage.removeItem(PENDING_ADVANCE_KEY);
+    if (attempt.currentQuestion === PGQuizService.roundSize(attempt.currentRound) &&
+        attempt.currentRound < 3) {
+      openTransition(attempt.currentRound);
+      return;
+    }
+    if (attempt.currentRound === 3 &&
+        attempt.currentQuestion === PGQuizService.roundSize(3)) {
+      attempt = PGParticipantService.finish(attempt);
+      verifyCompletion(attempt);
+      return;
+    }
+    showCurrentQuestion();
+  }
 
   function openTransition(round) {
     if (round === 1) {
@@ -126,6 +180,7 @@
     sessionStorage.removeItem(ACTIVE_KEY);
     sessionStorage.setItem(MAIN_COMPLETION_KEY, "1");
     attempt = null;
+    restoringQuizSessionId = "";
     verifiedCompletionResult = null;
     go("completion");
   }
@@ -134,7 +189,11 @@
     $("#completionRetry").hidden = true;
     setText("#completedAttemptId", submittedAttempt.id);
     try {
-      const result = verifiedCompletionResult || await PGMonitoringService.finish(submittedAttempt);
+      const result = verifiedCompletionResult ||
+        await PGMonitoringService.finish(submittedAttempt) ||
+        (restoringQuizSessionId
+          ? await PGMonitoringService.restore(submittedAttempt, restoringQuizSessionId)
+          : null);
       if (!result || !Array.isArray(result.review) || result.review.length + result.score !== 40 ||
           typeof result.rapidFinalEligible !== "boolean" ||
           !Number.isFinite(result.mainPercentage)) {
@@ -150,6 +209,7 @@
   }
 
   async function nextQuestion() {
+    sessionStorage.removeItem(PENDING_ADVANCE_KEY);
     if (attempt.currentQuestion < PGQuizService.roundSize(attempt.currentRound)) {
       showCurrentQuestion();
     } else if (attempt.currentRound < 3) {
@@ -176,6 +236,7 @@
     try {
       attempt = PGQuizService.saveAnswer(attempt, choice);
       answerLocked = true;
+      sessionStorage.setItem(PENDING_ADVANCE_KEY, "1");
       $("#contestLegit").disabled = true;
       $("#contestPhish").disabled = true;
       const last = attempt.currentQuestion === PGQuizService.roundSize(attempt.currentRound);
@@ -192,6 +253,7 @@
   $("#contestPhish").addEventListener("click", () => selectAnswer("phishing"));
   $("#startNextRound").addEventListener("click", () => {
     if (!attempt) return;
+    sessionStorage.removeItem(PENDING_ADVANCE_KEY);
     attempt.currentRound++;
     attempt.currentQuestion = 0;
     PGParticipantService.save(attempt);
@@ -325,6 +387,188 @@
       mainPercentage: status.mainPercentage
     });
     go("completion");
+  }
+
+  function localAttemptIsOneAnswerAhead(local, server) {
+    if (!local || !server || local.status !== "In Progress" ||
+        local.id !== server.id || local.answers.length !== server.answers.length + 1 ||
+        JSON.stringify(local.questionIds) !== JSON.stringify(server.questionIds)) return false;
+    return server.answers.every((answer, index) =>
+      JSON.stringify(answer) === JSON.stringify(local.answers[index]));
+  }
+
+  function submitRestoredCompletion(quizSessionId) {
+    attempt = PGParticipantService.finish(attempt);
+    const submitted = attempt;
+    PGMonitoringService.restore(submitted, quizSessionId).then(result => {
+      if (!result || !Array.isArray(result.review) ||
+          typeof result.rapidFinalEligible !== "boolean") {
+        throw new Error("The server did not verify the completed quiz.");
+      }
+      acceptCompletion(submitted, result);
+    }).catch(error => {
+      report("#completionError", "Your answers are saved. The server could not verify completion yet; refresh to retry. " + error.message);
+      go("completion");
+    });
+  }
+
+  async function restoreParticipantJourney() {
+    const savedView = sessionStorage.getItem(VIEW_KEY);
+    const local = activeAttemptId() ? PGParticipantService.get(activeAttemptId()) : null;
+    let current = null;
+    try {
+      const response = await fetch("/api/monitor/current", {
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+      if (response.ok) current = await response.json();
+      else if (![401, 404].includes(response.status)) {
+        const result = await response.json();
+        throw new Error(result.error || "Saved quiz session could not be restored.");
+      }
+    } catch (error) {
+      if (!local || local.status !== "In Progress") {
+        if (savedView === "participant-details") go("participant-details");
+        else report("#participantError", "Could not check for a saved quiz session. Refresh or retry when the connection is restored. " + error.message);
+        return;
+      }
+      attempt = local;
+      showResumeState();
+      PGMonitoringService.start(attempt, participantId => {
+        attempt = PGParticipantService.reidentify(attempt, participantId, attempt.startedAt);
+        sessionStorage.setItem(ACTIVE_KEY, participantId);
+      }).catch(restoreError => console.error("Quiz session reconnect:", restoreError));
+      return;
+    }
+
+    if (current && current.attempt) {
+      const serverAttempt = current.attempt;
+      restoringQuizSessionId = current.quizSessionId;
+      if (serverAttempt.status === "Completed" && savedView === "participant-details") {
+        sessionStorage.removeItem(ACTIVE_KEY);
+        restoreParticipantDraft();
+        go("participant-details");
+        return;
+      }
+      if (serverAttempt.status === "Completed") {
+        attempt = serverAttempt;
+        sessionStorage.removeItem(ACTIVE_KEY);
+        sessionStorage.removeItem(PENDING_ADVANCE_KEY);
+        sessionStorage.setItem(MAIN_COMPLETION_KEY, "1");
+        renderCompletionReview(attempt);
+        setText("#completedAttemptId", attempt.id);
+        go("completion");
+        try {
+          const status = await rapidRequest("/status");
+          restoreMainCompletion(status);
+          if (status.status === "in_progress" || status.status === "completed") {
+            sessionStorage.setItem(RAPID_FINAL_KEY, "1");
+            const state = await rapidRequest("/state");
+            reconcileRapidResponse(state);
+          }
+        } catch (error) {
+          renderRapidEligibility({
+            rapidFinalEligible: serverAttempt.score / serverAttempt.totalQuestions >= 0.95,
+            mainPercentage: serverAttempt.score / serverAttempt.totalQuestions * 100
+          });
+          report("#completionError",
+            "Your verified main-quiz result has been restored, but RAPID FINAL status could not be checked. Reconnect to verify eligibility. " + error.message);
+          rapidRetryTimer = window.setTimeout(resumeRapidFinal, 1500);
+        }
+        return;
+      }
+
+      const localCompletedMatchesServer = local && local.status === "Completed" &&
+        serverAttempt.status === "In Progress" &&
+        JSON.stringify(local.questionIds) === JSON.stringify(serverAttempt.questionIds) &&
+        JSON.stringify(local.answers) === JSON.stringify(serverAttempt.answers);
+      attempt = localCompletedMatchesServer || localAttemptIsOneAnswerAhead(local, serverAttempt)
+        ? local
+        : serverAttempt;
+      attempt.id = current.participantId;
+      attempt.startedAt = serverAttempt.startedAt;
+      sessionStorage.setItem(ACTIVE_KEY, attempt.id);
+      sessionStorage.removeItem(MAIN_COMPLETION_KEY);
+      PGDataService.saveAttempt(attempt);
+      if (attempt.status === "Completed") {
+        PGMonitoringService.restore(attempt, current.quizSessionId).then(result => {
+          if (!result || !Array.isArray(result.review)) {
+            throw new Error("The server did not verify the completed quiz.");
+          }
+          acceptCompletion(attempt, result);
+        }).catch(error => {
+          report("#completionError", "Your answers are saved. The server could not verify completion yet; refresh to retry. " + error.message);
+          go("completion");
+        });
+        return;
+      }
+      if (attempt.currentRound === 3 && attempt.currentQuestion === PGQuizService.roundSize(3)) {
+        submitRestoredCompletion(current.quizSessionId);
+        return;
+      }
+      PGMonitoringService.restore(attempt, current.quizSessionId, participantId => {
+        if (participantId !== attempt.id) {
+          attempt = PGParticipantService.reidentify(attempt, participantId, attempt.startedAt);
+          sessionStorage.setItem(ACTIVE_KEY, participantId);
+        }
+      }, serverAttempt).catch(error => report("#participantError",
+        "Your saved answers are restored. Live sync will retry when the connection returns. " + error.message));
+      showResumeState();
+      return;
+    }
+
+    if (current && !current.attempt && local && local.status === "Completed") {
+      attempt = local;
+      attempt.id = current.participantId;
+      restoringQuizSessionId = current.quizSessionId;
+      PGDataService.saveAttempt(attempt);
+      PGMonitoringService.restore(attempt, current.quizSessionId).then(result => {
+        if (!result || !Array.isArray(result.review)) {
+          throw new Error("The server did not verify the completed quiz.");
+        }
+        acceptCompletion(attempt, result);
+      }).catch(error => {
+        report("#completionError", "Your answers are saved. The server could not verify completion yet; refresh to retry. " + error.message);
+        go("completion");
+      });
+      return;
+    }
+
+    if (current && !current.attempt && local && local.status === "In Progress") {
+      attempt = local;
+      attempt.id = current.participantId;
+      restoringQuizSessionId = current.quizSessionId;
+      sessionStorage.setItem(ACTIVE_KEY, attempt.id);
+      PGDataService.saveAttempt(attempt);
+      if (attempt.currentRound === 3 && attempt.currentQuestion === PGQuizService.roundSize(3)) {
+        submitRestoredCompletion(current.quizSessionId);
+        return;
+      }
+      PGMonitoringService.restore(attempt, current.quizSessionId, participantId => {
+        if (participantId !== attempt.id) {
+          attempt = PGParticipantService.reidentify(attempt, participantId, attempt.startedAt);
+          sessionStorage.setItem(ACTIVE_KEY, participantId);
+        }
+      }).catch(error => report("#participantError",
+        "Your saved answers are restored. Live sync will retry when the connection returns. " + error.message));
+      showResumeState();
+      return;
+    }
+
+    if (local && local.status === "In Progress") {
+      attempt = local;
+      sessionStorage.setItem(ACTIVE_KEY, attempt.id);
+      showResumeState();
+      PGMonitoringService.start(attempt).catch(error => report("#participantError",
+        "Your saved answers are restored. Live sync will retry when the connection returns. " + error.message));
+      return;
+    }
+    if (savedView === "participant-details") {
+      restoreParticipantDraft();
+      go("participant-details");
+    }
+    else if (savedView && savedView !== "home" &&
+        !savedView.startsWith("rapid-") && savedView !== "completion") go(savedView);
   }
 
   async function rapidRequest(path, options = {}) {
@@ -493,6 +737,17 @@
     }
   }
 
+  function saveParticipantDraft(event) {
+    try {
+      const draft = Object.fromEntries(new FormData(event.currentTarget).entries());
+      sessionStorage.setItem(PARTICIPANT_DRAFT_KEY, JSON.stringify(draft));
+    } catch (error) {
+      console.warn("Could not save participant form draft:", error);
+    }
+  }
+  $("#participantForm").addEventListener("input", saveParticipantDraft);
+  $("#participantForm").addEventListener("change", saveParticipantDraft);
+
   $("#participantForm").addEventListener("submit", event => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -527,6 +782,7 @@
     }
     try {
       attempt = PGParticipantService.create(details, PGQuizService.selectQuestions());
+      sessionStorage.removeItem(PARTICIPANT_DRAFT_KEY);
       report("#participantError", "");
       startAttempt(attempt);
     } catch (error) {
@@ -995,6 +1251,7 @@
       startLiveMonitoring();
     }
   }).catch(error => console.error("Admin session restore:", error));
-  if (activeAttemptId()) resumeActiveAttempt();
-  resumeRapidFinal();
+  restoreParticipantJourney().catch(error => {
+    report("#participantError", "Saved quiz state could not be restored. " + error.message);
+  });
 })();

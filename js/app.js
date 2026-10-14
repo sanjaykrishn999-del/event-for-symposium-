@@ -4,6 +4,7 @@
    ========================================================================= */
 const $  = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+const VIEW_KEY = "phishguard.last-view.v1";
 const shuffle = a => a.map(v=>[Math.random(),v]).sort((x,y)=>x[0]-y[0]).map(v=>v[1]);
 const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -22,6 +23,8 @@ function go(id){
   if(id.startsWith("rapid-") &&
      (!window.PGPortalCanOpenRapidFinal || !PGPortalCanOpenRapidFinal())) id="completion";
   if(id==="participant-details" && window.PGPortalResume && PGPortalResume()) return;
+  try { sessionStorage.setItem(VIEW_KEY, id); }
+  catch (error) { console.warn("Could not save the current page for refresh recovery:", error); }
   $$("section.view").forEach(v=>v.classList.remove("active"));
   const el=$("#view-"+id); if(el){el.classList.add("active");}
   $$("nav.main button").forEach(b=>b.removeAttribute("aria-current"));

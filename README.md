@@ -61,7 +61,11 @@ updates. Attempts are upserted when created or changed; the admin does not
 poll or reload the full list after each change. The service worker checks the
 network for current app code and falls back to its cache when offline; it does
 not cache API requests or make offline attempts appear in the central admin
-portal.
+portal. On refresh, the participant session cookie retrieves the latest saved
+attempt and restores its round, question, answers, or completed result. Browser
+storage records only navigation and an unfinished answer confirmation; the
+server remains authoritative. RAPID FINAL resumes from its original
+server-recorded deadline.
 
 ### Deploying on Render
 
